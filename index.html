@@ -335,29 +335,58 @@
     async function playMelody() {
         await initAudio();
         if (isPlaying) return;
-        isPlaying = true;
         const blocks = Array.from(document.querySelectorAll('.note-block')).sort((a, b) => parseFloat(a.style.top) - parseFloat(b.style.top));
-        let startTime = audioCtx.currentTime + 0.1;
+        if (blocks.length === 0) return;
+        
+        isPlaying = true;
+        const pixelsPerSecond = 80; // 80px = 1秒
+        const baseTime = audioCtx.currentTime + 0.1;
+        const minTop = parseFloat(blocks[0].style.top);
+        let maxDuration = 0;
+
         for (const block of blocks) {
             if (!isPlaying) break;
             const midi = parseInt(block.dataset.midi);
-            const duration = parseFloat(block.style.height) / 80;
+            const top = parseFloat(block.style.top);
+            const height = parseFloat(block.style.height);
+            
+            // 開始時間と長さを計算
+            const startTime = baseTime + (top - minTop) / pixelsPerSecond;
+            const duration = height / pixelsPerSecond;
+            const endTime = startTime + duration;
+            if ((endTime - baseTime) > maxDuration) maxDuration = endTime - baseTime;
+
             const osc = audioCtx.createOscillator();
             const g = audioCtx.createGain();
             osc.type = 'triangle';
             osc.frequency.setValueAtTime(440 * Math.pow(2, (midi - 69) / 12), startTime);
+            
             g.gain.setValueAtTime(0, startTime);
-            g.gain.linearRampToValueAtTime(0.5, startTime + 0.02);
-            g.gain.linearRampToValueAtTime(0, startTime + duration);
+            g.gain.linearRampToValueAtTime(0.3, startTime + 0.02);
+            g.gain.linearRampToValueAtTime(0, endTime);
+            
             osc.connect(g); g.connect(masterGain);
-            osc.start(startTime); osc.stop(startTime + duration);
+            osc.start(startTime); osc.stop(endTime);
             activeNodes.push(osc);
-            const delay = (startTime - audioCtx.currentTime) * 1000;
-            setTimeout(() => { if(isPlaying){ block.classList.add('playing'); document.getElementById(`key-${midi}`).classList.add('active'); }}, delay);
-            setTimeout(() => { block.classList.remove('playing'); document.getElementById(`key-${midi}`).classList.remove('active'); }, delay + (duration * 1000));
-            startTime += duration + 0.05;
+
+            // 視覚フィードバック（光る演出）の予約
+            const startDelay = (startTime - audioCtx.currentTime) * 1000;
+            const endDelay = (endTime - audioCtx.currentTime) * 1000;
+            
+            setTimeout(() => { 
+                if(isPlaying) {
+                    block.classList.add('playing'); 
+                    document.getElementById(`key-${midi}`).classList.add('active'); 
+                }
+            }, startDelay);
+            
+            setTimeout(() => { 
+                block.classList.remove('playing'); 
+                document.getElementById(`key-${midi}`).classList.remove('active'); 
+            }, endDelay);
         }
-        setTimeout(() => { isPlaying = false; }, (startTime - audioCtx.currentTime) * 1000);
+        
+        setTimeout(() => { isPlaying = false; }, maxDuration * 1000 + 100);
     }
 
     function stopMelody() { isPlaying = false; activeNodes.forEach(n => { try { n.stop(); } catch(e){} }); activeNodes = []; document.querySelectorAll('.note-block').forEach(b => b.classList.remove('playing')); document.querySelectorAll('.key').forEach(k => k.classList.remove('active')); }
