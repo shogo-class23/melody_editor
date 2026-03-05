@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>とんぴょんの何度でも直せるエディター</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; background: #1a1a1a; color: white; margin: 0; overflow: hidden; }
+        .container { display: flex; flex-direction: column; height: 100vh; }
+        #log-container { flex-grow: 1; overflow-y: auto; background: #000; padding: 10px 0; border-bottom: 3px solid #444; position: relative; min-height: 500px; }
+        .note-block { position: absolute; border-radius: 4px; font-size: 11px; font-weight: bold; color: white; display: flex; justify-content: center; align-items: center; cursor: grab; user-select: none; box-shadow: 0 0 5px rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); min-height: 15px; }
+        
+        /* つまみをもっと掴みやすくしたぴょん！ */
+        .resizer { 
+            position: absolute; bottom: 0; left: 0; width: 100%; height: 15px; 
+            cursor: ns-resize; background: rgba(255,255,255,0.25); border-radius: 0 0 4px 4px; 
+            z-index: 20; 
+        }
+        .resizer:hover { background: rgba(255,255,255,0.6); }
+
+        .note-block.selected { border: 2px solid yellow; box-shadow: 0 0 10px yellow; z-index: 50; }
+        .note-block.playing { border: 3px solid white; box-shadow: 0 0 20px white; z-index: 100; background-color: #fff !important; color: #000; }
+        .piano { display: flex; justify-content: center; height: 80px; background: #333; padding: 10px 0; position: sticky; bottom: 0; width: 100%; z-index: 1000; }
+        .key { border: 1px solid #000; height: 100%; width: 25px; background: white; border-radius: 0 0 3px 3px; position: relative; }
+        .key.black { background: black; width: 18px; height: 60%; margin-left: -9px; margin-right: -9px; z-index: 2; }
+        .key.active { background: #ff4785 !important; }
+        #ui { padding: 10px; background: #222; border-bottom: 1px solid #444; z-index: 1001; }
+        .btn { padding: 8px 12px; font-size: 12px; cursor: pointer; border: none; border-radius: 10px; font-weight: bold; margin: 2px; color: white; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div id="ui">
+        <button id="toggleBtn" class="btn" style="background:#4caf50;" onclick="toggleMic()">録音開始</button>
+        <button id="playBtn" class="btn" style="background:#ff9800;" onclick="playMelody()">▶ 再生</button>
+        <button id="stopBtn" class="btn" style="background:#607d8b;" onclick="stopMelody()">■ 停止</button>
+        <button class="btn" style="background:#673ab7;" onclick="undo()">↩ 戻る</button>
+        <button class="btn" style="background:#673ab7;" onclick="redo()">↪ 進む</button>
+        <button class="btn" style="background:#2196f3;" onclick="mergeSelected()">合体</button>
+        <button class="btn" style="background:#9c27b0;" onclick="splitSelected()">分割</button>
+        <button class="btn" style="background:#f44336;" onclick="deleteSelected()">消去</button>
+    </div>
+    <div id="log-container"></div>
+    <div class="piano" id="piano-bar"></div>
+</div>
+
+<script>
+    const noteNames = ["ド", "ド#", "レ", "レ#", "ミ", "ファ", "ファ#", "ソ", "ソ#", "ラ", "ラ#", "シ"];
+    const colors = ["#FF5252", "#FF4081", "#E040FB", "#7C4DFF", "#536DFE", "#448AFF", "#40C4FF", "#18FFFF", "#64FFDA", "#69F0AE", "#B2FF59", "#EEFF41"];
+    let audioCtx, analyser, microphone, isRunning = false, nextTop = 10, currentBlock = null, lastNoteNumber = -1;
+    let activeNodes = [], isPlaying = false, masterGain;
+    let historyStack = [], redoStack = [];
+
+    const pianoBar = document.getElementById('piano-bar');
+    for (let i = 0; i < 24; i++) {
+        const div = document.createElement('div');
+        div.id = `key-${i + 48}`;
+        div.className = [1, 3, 6, 8, 10].includes(i % 12) ? 'key black' : 'key';
+        pianoBar.appendChild(div);
+    }
+
+    async function initAudio() {
+        if (!audioCtx) {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            masterGain = audioCtx.createGain();
+            masterGain.gain.setValueAtTime(0.7, audioCtx.currentTime); 
+            masterGain.connect(audioCtx.destination);
+        }
+        if (audioCtx.state === 'suspended') await audioCtx.resume();
+    }
+
+    // 状態保存の魔法
+    function saveHistory() {
+        const currentState = Array.from(document.querySelectorAll('.note-block')).map(b => ({
+            midi: b.dataset.midi, top: b.style.top, left: b.style.left, height: b.style.height, color: b.style.backgroundColor, text: b.innerText
+        }));
+        historyStack.push(JSON.stringify(currentState));
+        if (historyStack.length > 50) historyStack.shift();
+        redoStack = [];
+    }
+
+    function undo() {
+        if (historyStack.length === 0) return;
+        const current = Array.from(document.querySelectorAll('.note-block')).map(b => ({
+            midi: b.dataset.midi, top: b.style.top, left: b.style.left, height: b.style.height, color: b.style.backgroundColor, text: b.innerText
+        }));
+        redoStack.push(JSON.stringify(current));
+        applyState(JSON.parse(historyStack.pop()));
+    }
+
+    function redo() {
+        if (redoStack.length === 0) return;
+        const current = Array.from(document.querySelectorAll('.note-block')).map(b => ({
+            midi: b.dataset.midi, top: b.style.top, left: b.style.left, height: b.style.height, color: b.style.backgroundColor, text: b.innerText
+        }));
+        historyStack.push(JSON.stringify(current));
+        applyState(JSON.parse(redoStack.pop()));
+    }
+
+    function applyState(state) {
+        const container = document.getElementById('log-container');
+        container.innerHTML = '';
+        state.forEach(data => {
+            const b = createNoteElement(parseInt(data.midi), parseInt(data.top), parseInt(data.height));
+            b.style.left = data.left; b.style.backgroundColor = data.color; b.innerText = data.text;
+            container.appendChild(b);
+        });
+    }
+
+    // 録音
+    async function toggleMic() {
+        await initAudio();
+        if (!isRunning) {
+            saveHistory();
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            microphone = stream;
+            const source = audioCtx.createMediaStreamSource(stream);
+            analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 2048;
+            source.connect(analyser);
+            isRunning = true;
+            document.getElementById('toggleBtn').innerText = "録音中...";
+            update();
+        } else {
+            isRunning = false;
+            if (microphone) microphone.getTracks().forEach(t => t.stop());
+            document.getElementById('toggleBtn').innerText = "録音開始";
+        }
+    }
+
+    function update() {
+        if (!isRunning) return;
+        const buffer = new Float32Array(analyser.fftSize);
+        analyser.getFloatTimeDomainData(buffer);
+        const pitch = autoCorrelate(buffer, audioCtx.sampleRate);
+        if (pitch !== -1) {
+            const noteNum = Math.round(12 * (Math.log2(pitch / 440)) + 69);
+            if (noteNum === lastNoteNumber && currentBlock) {
+                currentBlock.style.height = (parseInt(currentBlock.style.height) + 4) + 'px';
+            } else if (noteNum >= 48 && noteNum <= 71) {
+                addLogBlock(noteNum);
+                lastNoteNumber = noteNum;
+            }
+        } else { lastNoteNumber = -1; currentBlock = null; }
+        requestAnimationFrame(update);
+    }
+
+    function addLogBlock(num) {
+        const block = createNoteElement(num, nextTop, 30);
+        document.getElementById('log-container').appendChild(block);
+        currentBlock = block;
+        nextTop += 40;
+        document.getElementById('log-container').scrollTop = document.getElementById('log-container').scrollHeight;
+    }
+
+    // 【魔法の再構築：バーを作る】
+    function createNoteElement(num, top, height) {
+        const block = document.createElement('div');
+        block.className = 'note-block';
+        const keyEl = document.getElementById(`key-${num}`);
+        block.style.width = (keyEl.getBoundingClientRect().width - 2) + 'px';
+        block.style.left = keyEl.offsetLeft + 'px';
+        block.style.top = top + 'px';
+        block.style.height = height + 'px';
+        block.style.backgroundColor = colors[num % 12];
+        block.innerText = noteNames[num % 12];
+        block.dataset.midi = num;
+        
+        const resizer = document.createElement('div');
+        resizer.className = 'resizer';
+        block.appendChild(resizer);
+        
+        // イベント登録をここでするぴょん
+        makeInteractive(block, resizer);
+        return block;
+    }
+
+    function makeInteractive(el, resizer) {
+        let isDragging = false, isResizing = false, hasMoved = false;
+        let startY, startH, offsetT, offsetL, startMouseX, startMouseY;
+
+        // 【ここがポイント！】リサイズの魔法
+        resizer.addEventListener('mousedown', (e) => {
+            saveHistory();
+            isResizing = true;
+            startY = e.clientY;
+            startH = parseInt(el.style.height);
+            e.stopPropagation();
+            e.preventDefault();
+        });
+
+        // 移動の魔法
+        el.addEventListener('mousedown', (e) => {
+            if (isResizing) return;
+            isDragging = true;
+            hasMoved = false;
+            startMouseX = e.clientX;
+            startMouseY = e.clientY;
+            offsetL = el.offsetLeft - e.clientX;
+            offsetT = el.offsetTop - e.clientY;
+            e.stopPropagation();
+        });
+
+        // マウスが動いたとき
+        const onMouseMove = (e) => {
+            if (isResizing) {
+                const newH = startH + (e.clientY - startY);
+                el.style.height = Math.max(15, newH) + 'px';
+            } else if (isDragging) {
+                if (!hasMoved && (Math.abs(e.clientX - startMouseX) > 5 || Math.abs(e.clientY - startMouseY) > 5)) {
+                    saveHistory();
+                    hasMoved = true;
+                }
+                el.style.left = (e.clientX + offsetL) + 'px';
+                el.style.top = (e.clientY + offsetT) + 'px';
+                updateLabel(el);
+            }
+        };
+
+        const onMouseUp = () => {
+            if (isDragging && !hasMoved) el.classList.toggle('selected');
+            isDragging = false;
+            isResizing = false;
+        };
+
+        // document全体で監視することで、素早く動かしても外れないようにするぴょん！
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+    }
+
+    function updateLabel(el) {
+        const keys = Array.from(document.querySelectorAll('.key'));
+        let closest = keys.reduce((prev, curr) => Math.abs(curr.offsetLeft - el.offsetLeft) < Math.abs(prev.offsetLeft - el.offsetLeft) ? curr : prev);
+        const num = parseInt(closest.id.replace('key-', ''));
+        el.innerText = noteNames[num % 12];
+        el.style.backgroundColor = colors[num % 12];
+        el.style.left = closest.offsetLeft + 'px';
+        el.dataset.midi = num;
+    }
+
+    function mergeSelected() {
+        saveHistory();
+        const sel = Array.from(document.querySelectorAll('.note-block.selected')).sort((a,b)=>parseFloat(a.style.top)-parseFloat(b.style.top));
+        if (sel.length < 2) return;
+        let minT = parseFloat(sel[0].style.top), maxB = 0, midi = sel[0].dataset.midi;
+        sel.forEach(b => { maxB = Math.max(maxB, parseFloat(b.style.top) + parseFloat(b.style.height)); b.remove(); });
+        document.getElementById('log-container').appendChild(createNoteElement(midi, minT, (maxB - minT)));
+    }
+
+    function splitSelected() {
+        saveHistory();
+        document.querySelectorAll('.note-block.selected').forEach(b => {
+            const h = parseFloat(b.style.height), t = parseFloat(b.style.top), newH = h / 2, midi = b.dataset.midi;
+            if (h < 30) return;
+            b.remove();
+            document.getElementById('log-container').appendChild(createNoteElement(midi, t, newH));
+            document.getElementById('log-container').appendChild(createNoteElement(midi, t + newH, newH));
+        });
+    }
+
+    function deleteSelected() { saveHistory(); document.querySelectorAll('.note-block.selected').forEach(b => b.remove()); }
+
+    async function playMelody() {
+        await initAudio();
+        if (isPlaying) return;
+        isPlaying = true;
+        const blocks = Array.from(document.querySelectorAll('.note-block')).sort((a, b) => parseFloat(a.style.top) - parseFloat(b.style.top));
+        let startTime = audioCtx.currentTime + 0.1;
+        for (const block of blocks) {
+            if (!isPlaying) break;
+            const midi = parseInt(block.dataset.midi);
+            const duration = parseFloat(block.style.height) / 80;
+            const osc = audioCtx.createOscillator();
+            const g = audioCtx.createGain();
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(440 * Math.pow(2, (midi - 69) / 12), startTime);
+            g.gain.setValueAtTime(0, startTime);
+            g.gain.linearRampToValueAtTime(0.5, startTime + 0.02);
+            g.gain.linearRampToValueAtTime(0, startTime + duration);
+            osc.connect(g); g.connect(masterGain);
+            osc.start(startTime); osc.stop(startTime + duration);
+            activeNodes.push(osc);
+            const delay = (startTime - audioCtx.currentTime) * 1000;
+            setTimeout(() => { if(isPlaying){ block.classList.add('playing'); document.getElementById(`key-${midi}`).classList.add('active'); }}, delay);
+            setTimeout(() => { block.classList.remove('playing'); document.getElementById(`key-${midi}`).classList.remove('active'); }, delay + (duration * 1000));
+            startTime += duration + 0.05;
+        }
+        setTimeout(() => { isPlaying = false; }, (startTime - audioCtx.currentTime) * 1000);
+    }
+
+    function stopMelody() { isPlaying = false; activeNodes.forEach(n => { try { n.stop(); } catch(e){} }); activeNodes = []; document.querySelectorAll('.note-block').forEach(b => b.classList.remove('playing')); document.querySelectorAll('.key').forEach(k => k.classList.remove('active')); }
+    function autoCorrelate(buf, sampleRate) {
+        let SIZE = buf.length, rms = 0;
+        for (let i=0; i<SIZE; i++) { rms += buf[i]*buf[i]; }
+        if (Math.sqrt(rms/SIZE) < 0.02) return -1;
+        let c = new Float32Array(SIZE);
+        for (let i=0; i<SIZE; i++) for (let j=0; j<SIZE-i; j++) c[i] = c[i] + buf[j]*buf[j+i];
+        let d=0; while (c[d]>c[d+1]) d++;
+        let maxval=-1, maxpos=-1;
+        for (let i=d; i<SIZE; i++) { if (c[i] > maxval) { maxval = c[i]; maxpos = i; } }
+        return sampleRate/maxpos;
+    }
+</script>
+</body>
+</html>
