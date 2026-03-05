@@ -23,7 +23,8 @@
         /* 再生バーのスタイル */
         #playhead {
             position: absolute; left: 0; width: 100%; height: 2px; background: red;
-            box-shadow: 0 0 5px red; z-index: 2000; pointer-events: none; display: none;
+            box-shadow: 0 0 5px red; z-index: 2000; pointer-events: none; display: block;
+            top: 0;
         }
 
         .piano { display: flex; justify-content: center; height: 80px; background: #333; padding: 10px 0; position: sticky; bottom: 0; width: 100%; z-index: 1000; }
@@ -74,20 +75,15 @@
 
     // 再生バーのアニメーション
     function updatePlayhead(startTime, baseTop, pps) {
-        if (!isPlaying) {
-            document.getElementById('playhead').style.display = 'none';
-            return;
-        }
+        if (!isPlaying) return;
         
         const elapsed = audioCtx.currentTime - startTime;
         const currentTop = baseTop + (elapsed * pps);
         const playhead = document.getElementById('playhead');
         const container = document.getElementById('log-container');
         
-        playhead.style.display = 'block';
         playhead.style.top = currentTop + 'px';
         
-        // バーが画面の下の方に来たら自動スクロール
         const containerHeight = container.clientHeight;
         const scrollPos = container.scrollTop;
         if (currentTop > scrollPos + containerHeight - 100) {
@@ -96,6 +92,15 @@
         
         requestAnimationFrame(() => updatePlayhead(startTime, baseTop, pps));
     }
+
+    // クリックで再生位置を指定
+    document.getElementById('log-container').addEventListener('mousedown', (e) => {
+        if (e.target.id === 'log-container') {
+            const rect = e.target.getBoundingClientRect();
+            const clickY = e.clientY - rect.top + e.target.scrollTop;
+            document.getElementById('playhead').style.top = clickY + 'px';
+        }
+    });
 
     // 音源作成の魔法（音色を分ける）
     function createOscillator(midi, startTime, duration = -1) {
@@ -571,18 +576,31 @@
     async function playMelody() {
         await initAudio();
         if (isPlaying) return;
-        const blocks = Array.from(document.querySelectorAll('.note-block')).sort((a, b) => parseFloat(a.style.top) - parseFloat(b.style.top));
-        if (blocks.length === 0) return;
+        const playhead = document.getElementById('playhead');
+        const startPos = parseFloat(playhead.style.top) || 0;
+        
+        // 開始位置より後にある音符だけを抽出
+        const blocks = Array.from(document.querySelectorAll('.note-block'))
+            .filter(b => (parseFloat(b.style.top) + parseFloat(b.style.height)) > startPos)
+            .sort((a, b) => parseFloat(a.style.top) - parseFloat(b.style.top));
+            
+        if (blocks.length === 0) {
+            // もし開始位置より後に音符がなければ、一番上から再生するか、何もしない
+            // ここでは利便性のために、もし何もなければ一番上に戻す
+            playhead.style.top = '0px';
+            return;
+        }
         
         isPlaying = true;
         try {
             const pixelsPerSecond = 80; // 80px = 1秒
             const baseTime = audioCtx.currentTime + 0.1;
-            const minTop = parseFloat(blocks[0].style.top) || 0;
+            // 再生バーの現在の位置を基準にする
+            const baseTop = startPos;
             let maxDuration = 0;
 
-            // 再生バーの開始
-            updatePlayhead(baseTime, minTop, pixelsPerSecond);
+            // 再生バーのアニメーション開始
+            updatePlayhead(baseTime, baseTop, pixelsPerSecond);
 
             for (const block of blocks) {
                 if (!isPlaying) break;
@@ -590,9 +608,16 @@
                 const top = parseFloat(block.style.top) || 0;
                 const height = parseFloat(block.style.height) || 0;
                 
-                // 開始時間と長さを計算
-                const startTime = baseTime + (top - minTop) / pixelsPerSecond;
-                const duration = height / pixelsPerSecond;
+                // バーをまたいでいる音符の開始時間を調整
+                const relativeTop = Math.max(0, top - baseTop);
+                const startTime = baseTime + relativeTop / pixelsPerSecond;
+                
+                // バーをまたいでいる場合は、残りの長さだけ鳴らす
+                let duration = height / pixelsPerSecond;
+                if (top < baseTop) {
+                    duration -= (baseTop - top) / pixelsPerSecond;
+                }
+                
                 const endTime = startTime + duration;
                 if ((endTime - baseTime) > maxDuration) maxDuration = endTime - baseTime;
 
