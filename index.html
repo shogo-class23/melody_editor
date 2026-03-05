@@ -19,6 +19,13 @@
 
         .note-block.selected { border: 2px solid yellow; box-shadow: 0 0 10px yellow; z-index: 50; }
         .note-block.playing { border: 3px solid white; box-shadow: 0 0 20px white; z-index: 100; background-color: #fff !important; color: #000; }
+        
+        /* 再生バーのスタイル */
+        #playhead {
+            position: absolute; left: 0; width: 100%; height: 2px; background: red;
+            box-shadow: 0 0 5px red; z-index: 2000; pointer-events: none; display: none;
+        }
+
         .piano { display: flex; justify-content: center; height: 80px; background: #333; padding: 10px 0; position: sticky; bottom: 0; width: 100%; z-index: 1000; }
         .key { border: 1px solid #000; height: 100%; width: 25px; background: white; border-radius: 0 0 3px 3px; position: relative; }
         .key.black { background: black; width: 18px; height: 60%; margin-left: -9px; margin-right: -9px; z-index: 2; }
@@ -52,7 +59,9 @@
             <option value="piano">ピアノ風</option>
         </select>
     </div>
-    <div id="log-container"></div>
+    <div id="log-container">
+        <div id="playhead"></div>
+    </div>
     <div class="piano" id="piano-bar"></div>
 </div>
 
@@ -62,6 +71,31 @@
     let audioCtx, analyser, microphone, isRunning = false, nextTop = 10, currentBlock = null, lastNoteNumber = -1;
     let activeNodes = [], isPlaying = false, masterGain;
     let historyStack = [], redoStack = [];
+
+    // 再生バーのアニメーション
+    function updatePlayhead(startTime, baseTop, pps) {
+        if (!isPlaying) {
+            document.getElementById('playhead').style.display = 'none';
+            return;
+        }
+        
+        const elapsed = audioCtx.currentTime - startTime;
+        const currentTop = baseTop + (elapsed * pps);
+        const playhead = document.getElementById('playhead');
+        const container = document.getElementById('log-container');
+        
+        playhead.style.display = 'block';
+        playhead.style.top = currentTop + 'px';
+        
+        // バーが画面の下の方に来たら自動スクロール
+        const containerHeight = container.clientHeight;
+        const scrollPos = container.scrollTop;
+        if (currentTop > scrollPos + containerHeight - 100) {
+            container.scrollTop = currentTop - (containerHeight / 2);
+        }
+        
+        requestAnimationFrame(() => updatePlayhead(startTime, baseTop, pps));
+    }
 
     // 音源作成の魔法（音色を分ける）
     function createOscillator(midi, startTime, duration = -1) {
@@ -546,6 +580,9 @@
             const baseTime = audioCtx.currentTime + 0.1;
             const minTop = parseFloat(blocks[0].style.top) || 0;
             let maxDuration = 0;
+
+            // 再生バーの開始
+            updatePlayhead(baseTime, minTop, pixelsPerSecond);
 
             for (const block of blocks) {
                 if (!isPlaying) break;
