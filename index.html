@@ -101,7 +101,9 @@
         container.innerHTML = '';
         state.forEach(data => {
             const b = createNoteElement(parseInt(data.midi), parseInt(data.top), parseInt(data.height));
-            b.style.left = data.left; b.style.backgroundColor = data.color; b.innerText = data.text;
+            b.style.left = data.left; b.style.backgroundColor = data.color;
+            const label = b.querySelector('.note-label');
+            if (label) label.innerText = data.text;
             container.appendChild(b);
         });
     }
@@ -162,7 +164,13 @@
         block.style.top = top + 'px';
         block.style.height = height + 'px';
         block.style.backgroundColor = colors[num % 12];
-        block.innerText = noteNames[num % 12];
+        
+        // ラベル用の要素を作成するぴょん
+        const label = document.createElement('span');
+        label.className = 'note-label';
+        label.innerText = noteNames[num % 12];
+        block.appendChild(label);
+        
         block.dataset.midi = num;
         
         const resizer = document.createElement('div');
@@ -231,7 +239,11 @@
         const keys = Array.from(document.querySelectorAll('.key'));
         let closest = keys.reduce((prev, curr) => Math.abs(curr.offsetLeft - el.offsetLeft) < Math.abs(prev.offsetLeft - el.offsetLeft) ? curr : prev);
         const num = parseInt(closest.id.replace('key-', ''));
-        el.innerText = noteNames[num % 12];
+        
+        // span.note-label だけを更新するから、つまみが消えないぴょん！
+        const label = el.querySelector('.note-label');
+        if (label) label.innerText = noteNames[num % 12];
+        
         el.style.backgroundColor = colors[num % 12];
         el.style.left = closest.offsetLeft + 'px';
         el.dataset.midi = num;
