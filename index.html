@@ -38,6 +38,11 @@
         <button class="btn" style="background:#2196f3;" onclick="mergeSelected()">合体</button>
         <button class="btn" style="background:#9c27b0;" onclick="splitSelected()">分割</button>
         <button class="btn" style="background:#f44336;" onclick="deleteSelected()">消去</button>
+        <span style="margin: 0 10px; border-left: 1px solid #555;"></span>
+        <button class="btn" style="background:#009688;" onclick="saveToFile()">💾 保存</button>
+        <button class="btn" style="background:#795548;" onclick="loadFromFile()">📂 開く</button>
+        <button class="btn" style="background:#e91e63;" onclick="newProject()">🆕 新規</button>
+        <input type="file" id="fileInput" style="display:none" accept=".json" onchange="handleFileSelect(event)">
     </div>
     <div id="log-container"></div>
     <div class="piano" id="piano-bar"></div>
@@ -49,6 +54,62 @@
     let audioCtx, analyser, microphone, isRunning = false, nextTop = 10, currentBlock = null, lastNoteNumber = -1;
     let activeNodes = [], isPlaying = false, masterGain;
     let historyStack = [], redoStack = [];
+
+    // プロジェクト管理
+    function getCurrentState() {
+        return Array.from(document.querySelectorAll('.note-block')).map(b => ({
+            midi: b.dataset.midi, 
+            top: b.style.top, 
+            left: b.style.left, 
+            height: b.style.height, 
+            color: b.style.backgroundColor, 
+            text: b.querySelector('.note-label').innerText
+        }));
+    }
+
+    function saveToFile() {
+        const data = JSON.stringify(getCurrentState(), null, 2);
+        const blob = new Blob([data], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `melody_${new Date().getTime()}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    function loadFromFile() {
+        document.getElementById('fileInput').click();
+    }
+
+    function handleFileSelect(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const state = JSON.parse(e.target.result);
+                saveHistory();
+                applyState(state);
+                // 読み込み後はスクロール位置などを調整
+                nextTop = state.reduce((max, b) => Math.max(max, parseFloat(b.top) + parseFloat(b.height) + 10), 10);
+            } catch (err) {
+                alert('ファイルの読み込みに失敗しました。');
+            }
+        };
+        reader.readAsText(file);
+        event.target.value = ''; // 連続で同じファイルを選べるようにリセット
+    }
+
+    function newProject() {
+        if (confirm('現在のメロディを消去して新しく作り直しますか？')) {
+            saveHistory();
+            document.getElementById('log-container').innerHTML = '';
+            nextTop = 10;
+            lastNoteNumber = -1;
+            currentBlock = null;
+        }
+    }
 
     const pianoBar = document.getElementById('piano-bar');
     for (let i = 0; i < 24; i++) {
