@@ -6,7 +6,36 @@
     <style>
         body { font-family: sans-serif; text-align: center; background: #1a1a1a; color: white; margin: 0; overflow: hidden; }
         .container { display: flex; flex-direction: column; height: 100vh; }
-        #log-container { flex-grow: 1; overflow-y: auto; background: #000; padding: 10px 0; border-bottom: 3px solid #444; position: relative; min-height: 500px; }
+        
+        #ui { padding: 10px; background: #222; border-bottom: 1px solid #444; z-index: 1001; }
+        .btn { padding: 8px 12px; font-size: 12px; cursor: pointer; border: none; border-radius: 10px; font-weight: bold; margin: 2px; color: white; }
+
+        /* トラック全体のコンテナ */
+        #tracks-wrapper { 
+            flex-grow: 1; display: flex; overflow-x: auto; overflow-y: hidden; 
+            background: #000; position: relative;
+        }
+
+        /* 各楽器のレーン */
+        .track-lane { 
+            position: relative; min-width: 350px; height: 100%; border-right: 2px solid #333;
+            display: flex; flex-direction: column;
+        }
+        
+        .track-header { 
+            position: sticky; top: 0; background: #222; z-index: 500; 
+            border-bottom: 2px solid #444; flex-shrink: 0;
+        }
+        .track-label { padding: 5px; font-weight: bold; color: #fff; background: #444; font-size: 14px; }
+
+        /* 音符を置くエリア */
+        .lane-content { 
+            position: relative; flex-grow: 1; overflow-y: auto; background: #000;
+            scrollbar-width: thin;
+        }
+        .lane-content::-webkit-scrollbar { width: 8px; }
+        .lane-content::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; }
+
         .note-block { position: absolute; border-radius: 4px; font-size: 11px; font-weight: bold; color: white; display: flex; justify-content: center; align-items: center; cursor: grab; user-select: none; box-shadow: 0 0 5px rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); min-height: 15px; }
         
         .resizer { 
@@ -25,12 +54,11 @@
             top: 0;
         }
 
-        .piano { display: flex; justify-content: center; height: 80px; background: #333; padding: 10px 0; position: sticky; bottom: 0; width: 100%; z-index: 1000; }
-        .key { border: 1px solid #000; height: 100%; width: 25px; background: white; border-radius: 0 0 3px 3px; position: relative; }
-        .key.black { background: black; width: 18px; height: 60%; margin-left: -9px; margin-right: -9px; z-index: 2; }
+        /* 鍵盤を上部に配置 */
+        .piano-container { display: flex; height: 50px; width: 100%; background: #333; }
+        .key { border: 1px solid #000; height: 100%; flex-grow: 1; background: white; border-radius: 0 0 3px 3px; position: relative; cursor: pointer; }
+        .key.black { background: black; flex-grow: 0.7; margin-left: -4%; margin-right: -4%; z-index: 2; height: 60%; }
         .key.active { background: #ff4785 !important; }
-        #ui { padding: 10px; background: #222; border-bottom: 1px solid #444; z-index: 1001; }
-        .btn { padding: 8px 12px; font-size: 12px; cursor: pointer; border: none; border-radius: 10px; font-weight: bold; margin: 2px; color: white; }
     </style>
 </head>
 <body>
@@ -55,56 +83,110 @@
         <label style="font-size: 12px; vertical-align: middle;">現在の楽器:</label>
         <select id="currentInst" class="btn" style="background:#333; color:white; border:1px solid #ff9800;">
             <option value="piano">🎹 ピアノ</option>
+            <option value="guitar">🎸 ギター</option>
             <option value="bass">🎸 ベース</option>
             <option value="drums">🥁 ドラム</option>
             <option value="synth">✨ シンセ</option>
             <option value="flute">🌬️ フルート</option>
         </select>
     </div>
-    <div id="log-container">
-        <div id="playhead"></div>
+    
+    <div id="tracks-wrapper">
+        <!-- JSで各楽器のレーンを生成 -->
     </div>
-    <div class="piano" id="piano-bar"></div>
 </div>
 
 <script>
     const noteNames = ["ド", "ド#", "レ", "レ#", "ミ", "ファ", "ファ#", "ソ", "ソ#", "ラ", "ラ#", "シ"];
-    const instColors = {
-        piano: ["#448AFF", "#2979FF", "#2962FF", "#1565C0"],
-        bass: ["#7E57C2", "#673AB7", "#5E35B1", "#512DA8"],
-        drums: ["#757575", "#616161", "#424242", "#212121"],
-        synth: ["#00E676", "#00C853", "#00B0FF", "#0091EA"],
-        flute: ["#FFD600", "#FFC400", "#FFAB00", "#FF8F00"]
+    const instrumentConfigs = {
+        piano: { name: "🎹 ピアノ", colors: ["#448AFF", "#2979FF", "#2962FF", "#1565C0"] },
+        guitar: { name: "🎸 ギター", colors: ["#FF7043", "#F4511E", "#E64A19", "#BF360C"] },
+        bass: { name: "🎸 ベース", colors: ["#7E57C2", "#673AB7", "#5E35B1", "#512DA8"] },
+        drums: { name: "🥁 ドラム", colors: ["#757575", "#616161", "#424242", "#212121"] },
+        synth: { name: "✨ シンセ", colors: ["#00E676", "#00C853", "#00B0FF", "#0091EA"] },
+        flute: { name: "🌬️ フルート", colors: ["#FFD600", "#FFC400", "#FFAB00", "#FF8F00"] }
     };
+
     let audioCtx, analyser, microphone, isRunning = false, nextTop = 10, currentBlock = null, lastNoteNumber = -1;
     let activeNodes = [], isPlaying = false, masterGain;
     let historyStack = [], redoStack = [];
 
+    const wrapper = document.getElementById('tracks-wrapper');
+    const trackLanes = {};
+    const laneContents = {};
+    const playhead = document.createElement('div');
+    playhead.id = 'playhead';
+    
+    Object.keys(instrumentConfigs).forEach(instId => {
+        const lane = document.createElement('div');
+        lane.className = 'track-lane';
+        lane.id = `lane-${instId}`;
+        
+        // ヘッダー（ラベル＋鍵盤）を上部に固定
+        const header = document.createElement('div');
+        header.className = 'track-header';
+        header.innerHTML = `<div class="track-label">${instrumentConfigs[instId].name}</div>`;
+        
+        const pianoContainer = document.createElement('div');
+        pianoContainer.className = 'piano-container';
+        for (let i = 0; i < 24; i++) {
+            const div = document.createElement('div');
+            const num = i + 48;
+            div.id = `key-${instId}-${num}`;
+            div.className = [1, 3, 6, 8, 10].includes(i % 12) ? 'key black' : 'key';
+            div.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                document.getElementById('currentInst').value = instId;
+                startKeyNote(num);
+            });
+            pianoContainer.appendChild(div);
+        }
+        header.appendChild(pianoContainer);
+        lane.appendChild(header);
+
+        // 音符コンテンツエリア
+        const content = document.createElement('div');
+        content.className = 'lane-content';
+        content.id = `content-${instId}`;
+        content.addEventListener('mousedown', (e) => {
+            if (e.target === content) {
+                const rect = content.getBoundingClientRect();
+                const clickY = e.clientY - rect.top + content.scrollTop;
+                syncPlayhead(clickY);
+            }
+        });
+        
+        lane.appendChild(content);
+        wrapper.appendChild(lane);
+        trackLanes[instId] = lane;
+        laneContents[instId] = content;
+    });
+    
+    // 最初のレーンに再生バーを入れる
+    laneContents['piano'].appendChild(playhead);
+
+    function syncPlayhead(y) {
+        playhead.style.top = y + 'px';
+    }
+
     function getInstColor(inst, midi) {
-        const pal = instColors[inst] || instColors.piano;
-        return pal[midi % pal.length];
+        const colors = instrumentConfigs[inst].colors;
+        return colors[midi % colors.length];
     }
 
     function updatePlayhead(startTime, baseTop, pps) {
         if (!isPlaying) return;
         const elapsed = audioCtx.currentTime - startTime;
         const currentTop = baseTop + (elapsed * pps);
-        const playhead = document.getElementById('playhead');
-        const container = document.getElementById('log-container');
         playhead.style.top = currentTop + 'px';
-        if (currentTop > container.scrollTop + container.clientHeight - 100) {
-            container.scrollTop = currentTop - (containerHeight / 2);
-        }
+        
+        Object.values(laneContents).forEach(content => {
+            if (currentTop > content.scrollTop + content.clientHeight - 100) {
+                content.scrollTop = currentTop - (content.clientHeight / 2);
+            }
+        });
         requestAnimationFrame(() => updatePlayhead(startTime, baseTop, pps));
     }
-
-    document.getElementById('log-container').addEventListener('mousedown', (e) => {
-        if (e.target.id === 'log-container') {
-            const rect = e.target.getBoundingClientRect();
-            const clickY = e.clientY - rect.top + e.target.scrollTop;
-            document.getElementById('playhead').style.top = clickY + 'px';
-        }
-    });
 
     function createOscillator(midi, startTime, duration = -1, inst = null) {
         const type = inst || document.getElementById('currentInst').value;
@@ -114,46 +196,40 @@
         g.gain.setValueAtTime(0, startTime);
 
         if (type === 'piano') {
-            const osc1 = audioCtx.createOscillator();
-            const osc2 = audioCtx.createOscillator();
+            const osc1 = audioCtx.createOscillator(); const osc2 = audioCtx.createOscillator();
             osc1.type = 'triangle'; osc2.type = 'sine';
-            osc1.frequency.setValueAtTime(freq, startTime);
-            osc2.frequency.setValueAtTime(freq * 2.01, startTime);
+            osc1.frequency.setValueAtTime(freq, startTime); osc2.frequency.setValueAtTime(freq * 2.01, startTime);
             const g1 = audioCtx.createGain(); g1.gain.value = 0.6;
             const g2 = audioCtx.createGain(); g2.gain.value = 0.3;
-            const attackTime = 0.01;
-            const release = duration > 0 ? duration : 1.5;
+            const attackTime = 0.01; const release = duration > 0 ? duration : 1.5;
             g.gain.linearRampToValueAtTime(0.7, startTime + attackTime); 
             g.gain.exponentialRampToValueAtTime(0.001, startTime + attackTime + release);
-            osc1.connect(g1); g1.connect(g);
-            osc2.connect(g2); g2.connect(g);
-            nodes.push(osc1, osc2);
-            // 必ず先にstartを呼ぶ
-            osc1.start(startTime); osc2.start(startTime);
-            if (duration > 0) {
-                osc1.stop(startTime + attackTime + release);
-                osc2.stop(startTime + attackTime + release);
-            }
+            osc1.connect(g1); g1.connect(g); osc2.connect(g2); g2.connect(g);
+            nodes.push(osc1, osc2); osc1.start(startTime); osc2.start(startTime);
+            if (duration > 0) { osc1.stop(startTime + attackTime + release); osc2.stop(startTime + attackTime + release); }
+        } else if (type === 'guitar') {
+            const osc = audioCtx.createOscillator(); osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(freq, startTime);
+            const filter = audioCtx.createBiquadFilter(); filter.type = 'lowpass';
+            filter.frequency.setValueAtTime(4000, startTime); filter.frequency.exponentialRampToValueAtTime(400, startTime + 0.5);
+            g.gain.linearRampToValueAtTime(0.8, startTime + 0.005);
+            const rel = duration > 0 ? duration : 1.2;
+            g.gain.exponentialRampToValueAtTime(0.001, startTime + rel);
+            osc.connect(filter); filter.connect(g);
+            nodes.push(osc); osc.start(startTime);
+            if (duration > 0) osc.stop(startTime + rel);
         } else if (type === 'bass') {
-            const osc = audioCtx.createOscillator();
-            osc.type = 'triangle';
+            const osc = audioCtx.createOscillator(); osc.type = 'triangle';
             osc.frequency.setValueAtTime(freq / 2, startTime); 
-            osc.connect(g); nodes.push(osc);
-            osc.start(startTime); // 必ず先にstartを呼ぶ
-
+            osc.connect(g); nodes.push(osc); osc.start(startTime);
             g.gain.linearRampToValueAtTime(0.8, startTime + 0.02);
             if (duration > 0) {
                 g.gain.linearRampToValueAtTime(0.4, startTime + duration);
                 g.gain.linearRampToValueAtTime(0, startTime + duration + 0.05);
                 osc.stop(startTime + duration + 0.05);
-            } else {
-                g.gain.linearRampToValueAtTime(0.4, startTime + 1.0);
-            }
+            } else { g.gain.linearRampToValueAtTime(0.4, startTime + 1.0); }
         } else if (type === 'drums') {
-            const osc = audioCtx.createOscillator();
-            osc.connect(g); nodes.push(osc);
-            osc.start(startTime); // 必ず先にstartを呼ぶ
-
+            const osc = audioCtx.createOscillator(); osc.connect(g); nodes.push(osc); osc.start(startTime);
             if (midi % 2 === 0) { 
                 osc.type = 'sine'; osc.frequency.setValueAtTime(150, startTime);
                 osc.frequency.exponentialRampToValueAtTime(40, startTime + 0.1);
@@ -167,17 +243,11 @@
                 osc.stop(startTime + 0.15);
             }
         } else if (type === 'flute') {
-            const osc = audioCtx.createOscillator();
-            osc.type = 'sine'; osc.frequency.setValueAtTime(freq, startTime);
-            osc.connect(g); nodes.push(osc);
-            osc.start(startTime); // 必ず先にstartを呼ぶ
-
-            const lfo = audioCtx.createOscillator();
-            const lfoGain = audioCtx.createGain();
+            const osc = audioCtx.createOscillator(); osc.type = 'sine'; osc.frequency.setValueAtTime(freq, startTime);
+            osc.connect(g); nodes.push(osc); osc.start(startTime);
+            const lfo = audioCtx.createOscillator(); const lfoGain = audioCtx.createGain();
             lfo.frequency.value = 5; lfoGain.gain.value = freq * 0.01;
-            lfo.connect(lfoGain); lfoGain.connect(osc.frequency);
-            lfo.start(startTime); nodes.push(lfo);
-
+            lfo.connect(lfoGain); lfoGain.connect(osc.frequency); lfo.start(startTime); nodes.push(lfo);
             g.gain.linearRampToValueAtTime(0.5, startTime + 0.1);
             if (duration > 0) {
                 g.gain.linearRampToValueAtTime(0.4, startTime + duration - 0.05);
@@ -185,18 +255,11 @@
                 osc.stop(startTime + duration); lfo.stop(startTime + duration);
             }
         } else {
-            const osc = audioCtx.createOscillator();
-            osc.type = 'sawtooth'; osc.frequency.setValueAtTime(freq, startTime);
-            const lowpass = audioCtx.createBiquadFilter();
-            lowpass.type = 'lowpass'; lowpass.frequency.setValueAtTime(2000, startTime);
-            osc.connect(lowpass); lowpass.connect(g); nodes.push(osc);
-            osc.start(startTime); // 必ず先にstartを呼ぶ
-
+            const osc = audioCtx.createOscillator(); osc.type = 'sawtooth'; osc.frequency.setValueAtTime(freq, startTime);
+            const lowpass = audioCtx.createBiquadFilter(); lowpass.type = 'lowpass'; lowpass.frequency.setValueAtTime(2000, startTime);
+            osc.connect(lowpass); lowpass.connect(g); nodes.push(osc); osc.start(startTime);
             g.gain.linearRampToValueAtTime(0.3, startTime + 0.02);
-            if (duration > 0) {
-                g.gain.linearRampToValueAtTime(0, startTime + duration);
-                osc.stop(startTime + duration);
-            }
+            if (duration > 0) { g.gain.linearRampToValueAtTime(0, startTime + duration); osc.stop(startTime + duration); }
         }
         g.connect(masterGain);
         return { g, nodes };
@@ -237,27 +300,20 @@
 
     function newProject() {
         if (confirm('消去？')) {
-            saveHistory(); document.getElementById('log-container').innerHTML = '<div id="playhead"></div>';
+            saveHistory(); 
+            Object.values(laneContents).forEach(content => {
+                Array.from(content.querySelectorAll('.note-block')).forEach(b => b.remove());
+            });
             nextTop = 10; lastNoteNumber = -1; currentBlock = null;
         }
     }
 
-    const pianoBar = document.getElementById('piano-bar');
-    for (let i = 0; i < 24; i++) {
-        const div = document.createElement('div');
-        const num = i + 48;
-        div.id = `key-${num}`;
-        div.className = [1, 3, 6, 8, 10].includes(i % 12) ? 'key black' : 'key';
-        div.addEventListener('mousedown', (e) => { e.preventDefault(); startKeyNote(num); });
-        pianoBar.appendChild(div);
-    }
     window.addEventListener('mouseup', stopKeyNote);
 
     async function initAudio() {
         if (!audioCtx) {
             audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            masterGain = audioCtx.createGain();
-            masterGain.gain.setValueAtTime(0.7, audioCtx.currentTime); 
+            masterGain = audioCtx.createGain(); masterGain.gain.setValueAtTime(0.7, audioCtx.currentTime); 
             masterGain.connect(audioCtx.destination);
         }
         if (audioCtx.state === 'suspended') await audioCtx.resume();
@@ -270,56 +326,55 @@
         pressedKey = num;
         const { g, nodes } = createOscillator(num, audioCtx.currentTime);
         keyGain = g; keyNodes = nodes;
-        document.getElementById(`key-${num}`).classList.add('active');
+        const inst = document.getElementById('currentInst').value;
+        const keyEl = document.getElementById(`key-${inst}-${num}`);
+        if (keyEl) keyEl.classList.add('active');
         if (!isRunning) { saveHistory(); update(); }
     }
 
     function stopKeyNote() {
         if (pressedKey === -1) return;
-        const type = document.getElementById('currentInst').value;
+        const inst = document.getElementById('currentInst').value;
         if (keyGain && keyNodes) {
-            if (['piano','bass','flute'].includes(type)) {
+            if (['piano','guitar','bass','flute'].includes(inst)) {
                 keyGain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
-            } else {
-                keyGain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.05);
-            }
+            } else { keyGain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.05); }
             setTimeout(() => { keyNodes.forEach(n => { try { n.stop(); } catch(e){} }); }, 200);
         }
-        document.getElementById(`key-${pressedKey}`).classList.remove('active');
+        const keyEl = document.getElementById(`key-${inst}-${pressedKey}`);
+        if (keyEl) keyEl.classList.remove('active');
         pressedKey = -1; lastNoteNumber = -1; currentBlock = null;
     }
 
     function saveHistory() {
-        const currentState = getCurrentState();
-        historyStack.push(JSON.stringify(currentState));
+        historyStack.push(JSON.stringify(getCurrentState()));
         if (historyStack.length > 50) historyStack.shift();
         redoStack = [];
     }
 
     function undo() {
         if (historyStack.length === 0) return;
-        const current = getCurrentState();
-        redoStack.push(JSON.stringify(current));
+        redoStack.push(JSON.stringify(getCurrentState()));
         applyState(JSON.parse(historyStack.pop()));
     }
 
     function redo() {
         if (redoStack.length === 0) return;
-        const current = getCurrentState();
-        historyStack.push(JSON.stringify(current));
+        historyStack.push(JSON.stringify(getCurrentState()));
         applyState(JSON.parse(redoStack.pop()));
     }
 
     function applyState(state) {
-        const container = document.getElementById('log-container');
-        container.innerHTML = '<div id="playhead"></div>';
+        Object.values(laneContents).forEach(content => {
+            Array.from(content.querySelectorAll('.note-block')).forEach(b => b.remove());
+        });
         state.forEach(data => {
             const inst = data.inst || 'piano';
             const b = createNoteElement(parseInt(data.midi), parseInt(data.top), parseInt(data.height), inst);
             b.style.left = data.left; b.style.backgroundColor = data.color;
             const label = b.querySelector('.note-label');
             if (label) label.innerText = data.text;
-            container.appendChild(b);
+            laneContents[inst].appendChild(b);
         });
     }
 
@@ -334,8 +389,7 @@
             source.connect(analyser);
             isRunning = true; document.getElementById('toggleBtn').innerText = "録音中..."; update();
         } else {
-            isRunning = false;
-            if (microphone) microphone.getTracks().forEach(t => t.stop());
+            isRunning = false; if (microphone) microphone.getTracks().forEach(t => t.stop());
             document.getElementById('toggleBtn').innerText = "録音開始";
         }
     }
@@ -343,20 +397,16 @@
     function update() {
         if (!isRunning && pressedKey === -1) return;
         let noteNum = -1;
-        if (pressedKey !== -1) {
-            noteNum = pressedKey;
-        } else if (isRunning) {
-            const buffer = new Float32Array(analyser.fftSize);
-            analyser.getFloatTimeDomainData(buffer);
+        if (pressedKey !== -1) { noteNum = pressedKey; } 
+        else if (isRunning) {
+            const buffer = new Float32Array(analyser.fftSize); analyser.getFloatTimeDomainData(buffer);
             const pitch = autoCorrelate(buffer, audioCtx.sampleRate);
             if (pitch !== -1) noteNum = Math.round(12 * (Math.log2(pitch / 440)) + 69);
         }
         if (noteNum !== -1) {
             if (noteNum === lastNoteNumber && currentBlock) {
                 currentBlock.style.height = (parseInt(currentBlock.style.height) + 4) + 'px';
-            } else if (noteNum >= 48 && noteNum <= 71) {
-                addLogBlock(noteNum); lastNoteNumber = noteNum;
-            }
+            } else if (noteNum >= 48 && noteNum <= 71) { addLogBlock(noteNum); lastNoteNumber = noteNum; }
         } else { lastNoteNumber = -1; currentBlock = null; }
         requestAnimationFrame(update);
     }
@@ -364,21 +414,25 @@
     function addLogBlock(num) {
         const inst = document.getElementById('currentInst').value;
         const block = createNoteElement(num, nextTop, 30, inst);
-        document.getElementById('log-container').appendChild(block);
+        laneContents[inst].appendChild(block);
         currentBlock = block; nextTop += 40;
-        document.getElementById('log-container').scrollTop = document.getElementById('log-container').scrollHeight;
+        laneContents[inst].scrollTop = laneContents[inst].scrollHeight;
     }
 
     function createNoteElement(num, top, height, inst = null) {
         const block = document.createElement('div');
         block.className = 'note-block';
         const currentInst = inst || document.getElementById('currentInst').value;
-        const keyEl = document.getElementById(`key-${num}`);
-        block.style.width = (keyEl.getBoundingClientRect().width - 2) + 'px';
-        block.style.left = keyEl.offsetLeft + 'px';
+        const keyEl = document.getElementById(`key-${currentInst}-${num}`);
+        const rect = keyEl.getBoundingClientRect();
+        const contentRect = laneContents[currentInst].getBoundingClientRect();
+        
+        block.style.width = (rect.width - 2) + 'px';
+        block.style.left = (rect.left - contentRect.left) + 'px';
         block.style.top = top + 'px';
         block.style.height = height + 'px';
         block.style.backgroundColor = getInstColor(currentInst, num);
+        
         const label = document.createElement('span');
         label.className = 'note-label'; label.innerText = noteNames[num % 12];
         block.appendChild(label);
@@ -409,9 +463,8 @@
             e.stopPropagation();
         });
         const onMouseMove = (e) => {
-            if (isResizing) {
-                el.style.height = Math.max(15, startH + (e.clientY - startY)) + 'px';
-            } else if (isDragging) {
+            if (isResizing) { el.style.height = Math.max(15, startH + (e.clientY - startY)) + 'px'; } 
+            else if (isDragging) {
                 const dx = e.clientX - startMouseX, dy = e.clientY - startMouseY;
                 if (!hasMoved && (Math.abs(dx) > 5 || Math.abs(dy) > 5)) { saveHistory(); hasMoved = true; }
                 selectedNotes.forEach(item => {
@@ -426,13 +479,18 @@
     }
 
     function updateLabel(el) {
-        const keys = Array.from(document.querySelectorAll('.key'));
-        let closest = keys.reduce((prev, curr) => Math.abs(curr.offsetLeft - el.offsetLeft) < Math.abs(prev.offsetLeft - el.offsetLeft) ? curr : prev);
-        const num = parseInt(closest.id.replace('key-', ''));
-        const label = el.querySelector('.note-label');
-        if (label) label.innerText = noteNames[num % 12];
-        el.style.backgroundColor = getInstColor(el.dataset.inst, num);
-        el.style.left = closest.offsetLeft + 'px'; el.dataset.midi = num;
+        const inst = el.dataset.inst;
+        const keys = Array.from(laneContents[inst].parentElement.querySelectorAll('.key'));
+        const contentRect = laneContents[inst].getBoundingClientRect();
+        let closest = keys.reduce((prev, curr) => {
+            const prevDist = Math.abs((prev.getBoundingClientRect().left - contentRect.left) - parseFloat(el.style.left));
+            const currDist = Math.abs((curr.getBoundingClientRect().left - contentRect.left) - parseFloat(el.style.left));
+            return currDist < prevDist ? curr : prev;
+        });
+        const num = parseInt(closest.id.split('-').pop());
+        const label = el.querySelector('.note-label'); if (label) label.innerText = noteNames[num % 12];
+        el.style.backgroundColor = getInstColor(inst, num);
+        el.style.left = (closest.getBoundingClientRect().left - contentRect.left) + 'px'; el.dataset.midi = num;
     }
 
     function mergeSelected() {
@@ -441,7 +499,7 @@
         if (sel.length < 2) return;
         let minT = parseFloat(sel[0].style.top), maxB = 0, midi = sel[0].dataset.midi, inst = sel[0].dataset.inst;
         sel.forEach(b => { maxB = Math.max(maxB, parseFloat(b.style.top) + parseFloat(b.style.height)); b.remove(); });
-        document.getElementById('log-container').appendChild(createNoteElement(midi, minT, (maxB - minT), inst));
+        laneContents[inst].appendChild(createNoteElement(midi, minT, (maxB - minT), inst));
     }
 
     function splitSelected() {
@@ -450,8 +508,8 @@
             const h = parseFloat(b.style.height), t = parseFloat(b.style.top), newH = h / 2, midi = b.dataset.midi, inst = b.dataset.inst;
             if (h < 30) return;
             b.remove();
-            document.getElementById('log-container').appendChild(createNoteElement(midi, t, newH, inst));
-            document.getElementById('log-container').appendChild(createNoteElement(midi, t + newH, newH, inst));
+            laneContents[inst].appendChild(createNoteElement(midi, t, newH, inst));
+            laneContents[inst].appendChild(createNoteElement(midi, t + newH, newH, inst));
         });
     }
 
@@ -474,38 +532,32 @@
         clipboard.forEach(data => {
             const b = createNoteElement(parseInt(data.midi), data.top + 50, parseFloat(data.height), data.inst);
             b.style.left = data.left; b.querySelector('.note-label').innerText = data.text;
-            b.classList.add('selected'); document.getElementById('log-container').appendChild(b);
+            b.classList.add('selected'); laneContents[data.inst].appendChild(b);
         });
     }
 
     async function playMelody() {
-        await initAudio();
-        if (isPlaying) return;
-        const playhead = document.getElementById('playhead');
+        await initAudio(); if (isPlaying) return;
         const startPos = parseFloat(playhead.style.top) || 0;
-        const blocks = Array.from(document.querySelectorAll('.note-block'))
+        const allBlocks = Array.from(document.querySelectorAll('.note-block'))
             .filter(b => (parseFloat(b.style.top) + parseFloat(b.style.height)) > startPos)
             .sort((a, b) => parseFloat(a.style.top) - parseFloat(b.style.top));
-        if (blocks.length === 0) { playhead.style.top = '0px'; return; }
+        if (allBlocks.length === 0) { playhead.style.top = '0px'; return; }
         isPlaying = true;
         try {
             const pps = 80, baseTime = audioCtx.currentTime + 0.1, baseTop = startPos;
-            let maxDuration = 0;
-            updatePlayhead(baseTime, baseTop, pps);
-            for (const block of blocks) {
+            let maxDuration = 0; updatePlayhead(baseTime, baseTop, pps);
+            for (const block of allBlocks) {
                 if (!isPlaying) break;
                 const midi = parseInt(block.dataset.midi), inst = block.dataset.inst || 'piano';
                 const top = parseFloat(block.style.top), height = parseFloat(block.style.height);
                 const startTime = baseTime + Math.max(0, top - baseTop) / pps;
-                let duration = height / pps;
-                if (top < baseTop) duration -= (baseTop - top) / pps;
-                const endTime = startTime + duration;
-                if ((endTime - baseTime) > maxDuration) maxDuration = endTime - baseTime;
-                const { nodes } = createOscillator(midi, startTime, duration, inst);
-                activeNodes.push(...nodes);
+                let duration = height / pps; if (top < baseTop) duration -= (baseTop - top) / pps;
+                const endTime = startTime + duration; if ((endTime - baseTime) > maxDuration) maxDuration = endTime - baseTime;
+                const { nodes } = createOscillator(midi, startTime, duration, inst); activeNodes.push(...nodes);
                 const sDel = Math.max(0, (startTime - audioCtx.currentTime) * 1000), eDel = Math.max(0, (endTime - audioCtx.currentTime) * 1000);
-                setTimeout(() => { if(isPlaying) { block.classList.add('playing'); document.getElementById(`key-${midi}`).classList.add('active'); }}, sDel);
-                setTimeout(() => { block.classList.remove('playing'); document.getElementById(`key-${midi}`).classList.remove('active'); }, eDel);
+                setTimeout(() => { if(isPlaying) { block.classList.add('playing'); const key = document.getElementById(`key-${inst}-${midi}`); if(key) key.classList.add('active'); }}, sDel);
+                setTimeout(() => { block.classList.remove('playing'); const key = document.getElementById(`key-${inst}-${midi}`); if(key) key.classList.remove('active'); }, eDel);
             }
             setTimeout(() => { isPlaying = false; }, (maxDuration * 1000) + 200);
         } catch (e) { console.error(e); isPlaying = false; }
@@ -513,14 +565,11 @@
 
     function stopMelody() { isPlaying = false; activeNodes.forEach(n => { try { n.stop(); } catch(e){} }); activeNodes = []; document.querySelectorAll('.note-block').forEach(b => b.classList.remove('playing')); document.querySelectorAll('.key').forEach(k => k.classList.remove('active')); }
     function autoCorrelate(buf, sampleRate) {
-        let SIZE = buf.length, rms = 0;
-        for (let i=0; i<SIZE; i++) rms += buf[i]*buf[i];
+        let SIZE = buf.length, rms = 0; for (let i=0; i<SIZE; i++) rms += buf[i]*buf[i];
         if (Math.sqrt(rms/SIZE) < 0.02) return -1;
-        let c = new Float32Array(SIZE);
-        for (let i=0; i<SIZE; i++) for (let j=0; j<SIZE-i; j++) c[i] = c[i] + buf[j]*buf[j+i];
+        let c = new Float32Array(SIZE); for (let i=0; i<SIZE; i++) for (let j=0; j<SIZE-i; j++) c[i] = c[i] + buf[j]*buf[j+i];
         let d=0; while (c[d]>c[d+1]) d++;
-        let maxval=-1, maxpos=-1;
-        for (let i=d; i<SIZE; i++) if (c[i] > maxval) { maxval = c[i]; maxpos = i; }
+        let maxval=-1, maxpos=-1; for (let i=d; i<SIZE; i++) if (c[i] > maxval) { maxval = c[i]; maxpos = i; }
         return sampleRate/maxpos;
     }
 </script>
