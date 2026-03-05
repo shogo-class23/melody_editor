@@ -38,6 +38,8 @@
         <button class="btn" style="background:#2196f3;" onclick="mergeSelected()">合体</button>
         <button class="btn" style="background:#9c27b0;" onclick="splitSelected()">分割</button>
         <button class="btn" style="background:#f44336;" onclick="deleteSelected()">消去</button>
+        <button class="btn" style="background:#607d8b;" onclick="copySelected()">📄 コピー</button>
+        <button class="btn" style="background:#607d8b;" onclick="pasteSelected()">📋 貼付</button>
         <span style="margin: 0 10px; border-left: 1px solid #555;"></span>
         <button class="btn" style="background:#009688;" onclick="saveToFile()">💾 保存</button>
         <button class="btn" style="background:#795548;" onclick="loadFromFile()">📂 開く</button>
@@ -374,8 +376,11 @@
     function makeInteractive(el, resizer) {
         let isDragging = false, isResizing = false, hasMoved = false;
         let startY, startH, offsetT, offsetL, startMouseX, startMouseY;
+        
+        // 一括移動用のメモリ
+        let selectedNotes = [];
 
-        // 【ここがポイント！】リサイズの魔法
+        // 【ここがポイント！】リサイズの魔法（常に1つだけ）
         resizer.addEventListener('mousedown', (e) => {
             saveHistory();
             isResizing = true;
@@ -385,15 +390,30 @@
             e.preventDefault();
         });
 
-        // 移動の魔法
+        // 移動の魔法（選択されているものを一括で！）
         el.addEventListener('mousedown', (e) => {
             if (isResizing) return;
             isDragging = true;
             hasMoved = false;
             startMouseX = e.clientX;
             startMouseY = e.clientY;
-            offsetL = el.offsetLeft - e.clientX;
-            offsetT = el.offsetTop - e.clientY;
+            
+            // もしクリックした音符が選択されていなければ、それだけを選択状態にする
+            if (!el.classList.contains('selected')) {
+                // Ctrlキー（またはShiftキー）を押していなければ他の選択を解除
+                if (!e.ctrlKey && !e.shiftKey) {
+                    document.querySelectorAll('.note-block.selected').forEach(b => b.classList.remove('selected'));
+                }
+                el.classList.add('selected');
+            }
+
+            // 選択されているすべての音符の初期位置を記録
+            selectedNotes = Array.from(document.querySelectorAll('.note-block.selected')).map(b => ({
+                el: b,
+                startTop: parseFloat(b.style.top),
+                startLeft: parseFloat(b.style.left)
+            }));
+
             e.stopPropagation();
         });
 
@@ -403,23 +423,36 @@
                 const newH = startH + (e.clientY - startY);
                 el.style.height = Math.max(15, newH) + 'px';
             } else if (isDragging) {
-                if (!hasMoved && (Math.abs(e.clientX - startMouseX) > 5 || Math.abs(e.clientY - startMouseY) > 5)) {
+                const dx = e.clientX - startMouseX;
+                const dy = e.clientY - startMouseY;
+                
+                if (!hasMoved && (Math.abs(dx) > 5 || Math.abs(dy) > 5)) {
                     saveHistory();
                     hasMoved = true;
                 }
-                el.style.left = (e.clientX + offsetL) + 'px';
-                el.style.top = (e.clientY + offsetT) + 'px';
-                updateLabel(el);
+                
+                // 選択されているすべての音符を同じ分だけ動かす
+                selectedNotes.forEach(item => {
+                    const newTop = item.startTop + dy;
+                    const newLeft = item.startLeft + dx;
+                    item.el.style.top = newTop + 'px';
+                    item.el.style.left = newLeft + 'px';
+                    updateLabel(item.el); // 各自の音名ラベルを更新
+                });
             }
         };
 
-        const onMouseUp = () => {
-            if (isDragging && !hasMoved) el.classList.toggle('selected');
+        const onMouseUp = (e) => {
+            if (isDragging && !hasMoved) {
+                // 動かさずにクリックだけした場合は、選択状態を反転
+                // ただし、mousedownで選択追加済みなので、ここで再反転させるロジックを微調整
+                // （簡易化のため、ここではフラグ管理のみ）
+            }
             isDragging = false;
             isResizing = false;
+            selectedNotes = [];
         };
 
-        // document全体で監視することで、素早く動かしても外れないようにする
         document.addEventListener('mousemove', onMouseMove);
         document.addEventListener('mouseup', onMouseUp);
     }
@@ -459,6 +492,47 @@
     }
 
     function deleteSelected() { saveHistory(); document.querySelectorAll('.note-block.selected').forEach(b => b.remove()); }
+
+    // クリップボードの魔法
+    let clipboard = [];
+    function copySelected() {
+        const selected = Array.from(document.querySelectorAll('.note-block.selected'));
+        if (selected.length === 0) return;
+        
+        clipboard = selected.map(b => ({
+            midi: b.dataset.midi,
+            top: parseFloat(b.style.top),
+            left: b.style.left,
+            height: b.style.height,
+            color: b.style.backgroundColor,
+            text: b.querySelector('.note-label').innerText
+        }));
+    }
+
+    function pasteSelected() {
+        if (clipboard.length === 0) return;
+        saveHistory();
+        
+        // 現在の選択を解除
+        document.querySelectorAll('.note-block.selected').forEach(b => b.classList.remove('selected'));
+        
+        const container = document.getElementById('log-container');
+        // 少し下にずらしてペースト（50px）
+        const offset = 50;
+        
+        clipboard.forEach(data => {
+            const b = createNoteElement(parseInt(data.midi), data.top + offset, parseFloat(data.height));
+            b.style.left = data.left;
+            b.style.backgroundColor = data.color;
+            b.querySelector('.note-label').innerText = data.text;
+            // ペーストしたものを選択状態にする
+            b.classList.add('selected');
+            container.appendChild(b);
+        });
+        
+        // 最後にペーストした位置までスクロール
+        container.scrollTop = container.scrollHeight;
+    }
 
     async function playMelody() {
         await initAudio();
