@@ -704,15 +704,18 @@
 
         const onMouseMove = (e) => {
             if (isResizing) { 
-                const newH = Math.max(15, startH + (e.clientY - startY));
-                const deltaH = newH - startH;
-                el.style.height = newH + 'px';
+                const deltaY = e.clientY - startY;
+                const deltaH = (startH + deltaY) - startH;
                 
-                // 後ろの音符を一斉にずらす
+                selectedNotes.forEach(item => {
+                    item.el.style.height = Math.max(15, item.startH + deltaY) + 'px';
+                });
+                
+                const actualDeltaH = Math.max(15, startH + deltaY) - startH;
                 allOtherNotes.forEach(note => {
-                    if (note.el === el) return;
+                    if (selectedNotes.some(s => s.el === note.el)) return;
                     if (note.initialTop >= startTop + startH - 1) {
-                        note.el.style.top = (note.initialTop + deltaH) + 'px';
+                        note.el.style.top = (note.initialTop + actualDeltaH) + 'px';
                     }
                 });
             } 
