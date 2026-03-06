@@ -65,6 +65,7 @@
 <div class="container">
     <div id="ui">
         <button id="toggleBtn" class="btn" style="background:#4caf50;" onclick="toggleMic()">録音開始</button>
+        <button class="btn" style="background:#607d8b;" onclick="rewindToStart()">⏮ 最初へ</button>
         <button id="playBtn" class="btn" style="background:#ff9800;" onclick="playMelody()">▶ 再生</button>
         <button id="stopBtn" class="btn" style="background:#607d8b;" onclick="stopMelody()">■ 停止</button>
         <button class="btn" style="background:#673ab7;" onclick="undo()">↩ 戻る</button>
@@ -116,12 +117,18 @@
     const MAX_SILENCE_FRAMES = 10;
     let recordStartTime = 0, recordStartTop = 0;
     const pps = 80;
+    let countdownTimer = null;
 
     const wrapper = document.getElementById('tracks-wrapper');
     const trackLanes = {};
     const laneContents = {};
     const playhead = document.createElement('div');
     playhead.id = 'playhead';
+
+    function rewindToStart() {
+        syncPlayhead(0);
+        Object.values(laneContents).forEach(c => c.scrollTop = 0);
+    }
     
     Object.keys(instrumentConfigs).forEach(instId => {
         const lane = document.createElement('div');
@@ -173,6 +180,7 @@
 
     function syncPlayhead(y) {
         playhead.style.top = y + 'px';
+        nextTop = y; // キーボード入力の開始位置も同期
     }
 
     function getInstColor(inst, midi) {
@@ -385,22 +393,77 @@
         });
     }
 
+    function playBeep(freq, startTime) {
+        const osc = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, startTime);
+        g.gain.setValueAtTime(0.1, startTime);
+        g.gain.exponentialRampToValueAtTime(0.001, startTime + 0.1);
+        osc.connect(g);
+        g.connect(audioCtx.destination);
+        osc.start(startTime);
+        osc.stop(startTime + 0.1);
+    }
+
     async function toggleMic() {
         await initAudio();
+        const btn = document.getElementById('toggleBtn');
+        
         if (!isRunning) {
-            saveHistory();
-            recordStartTime = audioCtx.currentTime;
-            recordStartTop = parseFloat(playhead.style.top) || 0;
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            microphone = stream;
-            const source = audioCtx.createMediaStreamSource(stream);
-            analyser = audioCtx.createAnalyser(); analyser.fftSize = 2048;
-            source.connect(analyser);
-            isRunning = true; document.getElementById('toggleBtn').innerText = "録音中..."; update();
+            if (countdownTimer) return;
+            
+            btn.innerText = "マイク準備中...";
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                microphone = stream;
+            } catch (e) {
+                alert("マイクが使えません");
+                return;
+            }
+
+            let count = 3;
+            btn.style.background = "#f44336";
+            
+            countdownTimer = setInterval(() => {
+                if (count > 0) {
+                    btn.innerText = `準備... ${count}`;
+                    playBeep(440, audioCtx.currentTime);
+                    count--;
+                } else {
+                    clearInterval(countdownTimer);
+                    countdownTimer = null;
+                    playBeep(880, audioCtx.currentTime);
+                    startRecordingAfterReady();
+                }
+            }, 1000);
+            
+            btn.innerText = `準備... ${count}`;
+            playBeep(440, audioCtx.currentTime);
+            count--;
         } else {
-            isRunning = false; if (microphone) microphone.getTracks().forEach(t => t.stop());
-            document.getElementById('toggleBtn').innerText = "録音開始";
+            stopRecording();
         }
+    }
+
+    function startRecordingAfterReady() {
+        saveHistory();
+        const source = audioCtx.createMediaStreamSource(microphone);
+        analyser = audioCtx.createAnalyser(); analyser.fftSize = 2048;
+        source.connect(analyser);
+        recordStartTime = audioCtx.currentTime;
+        recordStartTop = parseFloat(playhead.style.top) || 0;
+        isRunning = true; 
+        document.getElementById('toggleBtn').innerText = "🔴 録音中..."; 
+        update();
+    }
+
+    function stopRecording() {
+        isRunning = false; 
+        if (microphone) microphone.getTracks().forEach(t => t.stop());
+        const btn = document.getElementById('toggleBtn');
+        btn.innerText = "録音開始";
+        btn.style.background = "#4caf50";
     }
 
     function update() {
