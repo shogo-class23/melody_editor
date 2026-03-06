@@ -83,6 +83,7 @@
         <button class="btn" style="background:#ffc107; color: black;" onclick="generateChord()">✨ 和音作成</button>
         <button class="btn" style="background:#7e57c2;" onclick="generateBass()">🎸 ベース作成</button>
         <button class="btn" style="background:#f44336;" onclick="deleteSelected()">消去</button>
+        <button class="btn" style="background:#2196f3;" onclick="selectAllNotes()">✔ 全選択</button>
         <button class="btn" style="background:#607d8b;" onclick="copySelected()">📄 コピー</button>
         <button class="btn" style="background:#607d8b;" onclick="pasteSelected()">📋 貼付</button>
         <span style="margin: 0 10px; border-left: 1px solid #555;"></span>
@@ -156,7 +157,14 @@
         // ヘッダー（ラベル＋鍵盤）を上部に固定
         const header = document.createElement('div');
         header.className = 'track-header';
-        header.innerHTML = `<div class="track-label">${instrumentConfigs[instId].name}</div>`;
+        header.innerHTML = `<div class="track-label" style="cursor:pointer;" title="クリックでこの楽器を全選択">${instrumentConfigs[instId].name}</div>`;
+        
+        header.querySelector('.track-label').addEventListener('click', () => {
+            // 他の選択を解除
+            document.querySelectorAll('.note-block.selected').forEach(b => b.classList.remove('selected'));
+            // このレーンの音符のみ全選択
+            laneContents[instId].querySelectorAll('.note-block').forEach(b => b.classList.add('selected'));
+        });
         
         const pianoContainer = document.createElement('div');
         pianoContainer.className = 'piano-container';
