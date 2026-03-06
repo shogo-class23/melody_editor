@@ -113,6 +113,24 @@
         <label style="font-size: 12px; vertical-align: middle; margin-left:10px;">速さ:</label>
         <input type="range" id="speedSlider" min="40" max="200" value="80" step="10" oninput="updateSpeed(this.value)" style="vertical-align: middle;">
         <span id="speedValue" style="font-size: 12px; width: 25px; display: inline-block;">80</span>
+        <label style="font-size: 12px; vertical-align: middle; margin-left:10px; color: #00e676; font-weight: bold;">
+            キー:
+            <select id="keySelect" class="btn" style="background:#333; color:white; border:1px solid #00e676; padding: 2px 5px; font-size: 11px;">
+                <option value="0">C (ド)</option>
+                <option value="1">C#</option>
+                <option value="2">D (レ)</option>
+                <option value="3">D#</option>
+                <option value="4">E (ミ)</option>
+                <option value="5">F (ファ)</option>
+                <option value="6">F#</option>
+                <option value="7">G (ソ)</option>
+                <option value="8">G#</option>
+                <option value="9">A (ラ)</option>
+                <option value="10">A#</option>
+                <option value="11">B (シ)</option>
+            </select>
+        </label>
+        <button class="btn" style="background:#00e676; color: black; padding: 2px 8px;" onclick="detectKeyFromMelody()">🔍 キー判定</button>
     </div>
     
     <div id="tracks-wrapper">
