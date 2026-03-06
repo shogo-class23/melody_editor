@@ -81,6 +81,7 @@
         <button class="btn" style="background:#ff5722;" onclick="shiftOctave(1)">⬆ オクターブ</button>
         <button class="btn" style="background:#ff5722;" onclick="shiftOctave(-1)">⬇ オクターブ</button>
         <button class="btn" style="background:#ffc107; color: black;" onclick="generateChord()">✨ 和音作成</button>
+        <button class="btn" style="background:#7e57c2;" onclick="generateBass()">🎸 ベース作成</button>
         <button class="btn" style="background:#f44336;" onclick="deleteSelected()">消去</button>
         <button class="btn" style="background:#607d8b;" onclick="copySelected()">📄 コピー</button>
         <button class="btn" style="background:#607d8b;" onclick="pasteSelected()">📋 貼付</button>
@@ -753,6 +754,25 @@
                     if (newBlock) laneContents[inst].appendChild(newBlock);
                 }
             });
+        });
+    }
+
+    function generateBass() {
+        const selected = Array.from(document.querySelectorAll('.note-block.selected'));
+        if (selected.length === 0) { alert("ベースにしたいメロディを選択してください"); return; }
+        saveHistory();
+        selected.forEach(el => {
+            const baseMidi = parseInt(el.dataset.midi);
+            const top = parseFloat(el.style.top);
+            const height = parseFloat(el.style.height);
+            
+            // メロディの2オクターブ下をベースにする
+            let bassMidi = baseMidi - 24;
+            // 低すぎると音が鳴らないので、MIDI 36 (低いド) 以上にする
+            while (bassMidi < 36) bassMidi += 12; 
+            
+            const newBlock = createNoteElement(bassMidi, top, height, 'bass');
+            if (newBlock) laneContents['bass'].appendChild(newBlock);
         });
     }
 
