@@ -78,6 +78,7 @@
         <button class="btn" style="background:#673ab7;" onclick="redo()">↪ 進む</button>
         <button class="btn" style="background:#2196f3;" onclick="mergeSelected()">合体</button>
         <button class="btn" style="background:#9c27b0;" onclick="splitSelected()">分割</button>
+        <button class="btn" style="background:#00bcd4;" onclick="alignNoteEnds()">📏 お尻を揃える</button>
         <button class="btn" style="background:#ff5722;" onclick="shiftOctave(1)">⬆ オクターブ</button>
         <button class="btn" style="background:#ff5722;" onclick="shiftOctave(-1)">⬇ オクターブ</button>
         <button class="btn" style="background:#ffc107; color: black;" onclick="generateChord()">✨ 和音作成</button>
@@ -704,18 +705,15 @@
 
         const onMouseMove = (e) => {
             if (isResizing) { 
-                const deltaY = e.clientY - startY;
-                const deltaH = (startH + deltaY) - startH;
+                const newH = Math.max(15, startH + (e.clientY - startY));
+                const deltaH = newH - startH;
+                el.style.height = newH + 'px';
                 
-                selectedNotes.forEach(item => {
-                    item.el.style.height = Math.max(15, item.startH + deltaY) + 'px';
-                });
-                
-                const actualDeltaH = Math.max(15, startH + deltaY) - startH;
+                // 後ろの音符を一斉にずらす
                 allOtherNotes.forEach(note => {
-                    if (selectedNotes.some(s => s.el === note.el)) return;
+                    if (note.el === el) return;
                     if (note.initialTop >= startTop + startH - 1) {
-                        note.el.style.top = (note.initialTop + actualDeltaH) + 'px';
+                        note.el.style.top = (note.initialTop + deltaH) + 'px';
                     }
                 });
             } 
@@ -826,7 +824,6 @@
         });
 
         const chordSize = parseInt(document.getElementById('chordSize').value);
-        // 和音の構成音の間隔 (1, 3, 5, 7, 9, 11, 13度)
         const chordIntervals = [0, 4, 7, 10, 14, 17, 21];
 
         for (let t = minTop; t < maxBottom; t += pps) {
@@ -849,6 +846,37 @@
                 if (b) laneContents['guitar'].appendChild(b);
             }
         }
+    }
+
+    function alignNoteEnds() {
+        const selected = Array.from(document.querySelectorAll('.note-block.selected'));
+        if (selected.length < 2) { alert("2つ以上のバーを選択してください"); return; }
+        saveHistory();
+        let maxB = 0;
+        selected.forEach(b => {
+            const bottom = parseFloat(b.style.top) + parseFloat(b.style.height);
+            if (bottom > maxB) maxB = bottom;
+        });
+        selected.forEach(b => {
+            const t = parseFloat(b.style.top);
+            b.style.height = Math.max(15, maxB - t) + 'px';
+        });
+    }
+
+    function alignNoteStarts() {
+        const selected = Array.from(document.querySelectorAll('.note-block.selected'));
+        if (selected.length < 2) return;
+        saveHistory();
+        let minT = Infinity;
+        selected.forEach(b => {
+            const top = parseFloat(b.style.top);
+            if (top < minT) minT = top;
+        });
+        selected.forEach(b => {
+            const bottom = parseFloat(b.style.top) + parseFloat(b.style.height);
+            b.style.top = minT + 'px';
+            b.style.height = Math.max(15, bottom - minT) + 'px';
+        });
     }
 
     function updateLabel(el) {
