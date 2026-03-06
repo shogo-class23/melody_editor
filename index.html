@@ -80,6 +80,7 @@
         <button class="btn" style="background:#9c27b0;" onclick="splitSelected()">分割</button>
         <button class="btn" style="background:#ff5722;" onclick="shiftOctave(1)">⬆ オクターブ</button>
         <button class="btn" style="background:#ff5722;" onclick="shiftOctave(-1)">⬇ オクターブ</button>
+        <button class="btn" style="background:#ffc107; color: black;" onclick="generateChord()">✨ 和音作成</button>
         <button class="btn" style="background:#f44336;" onclick="deleteSelected()">消去</button>
         <button class="btn" style="background:#607d8b;" onclick="copySelected()">📄 コピー</button>
         <button class="btn" style="background:#607d8b;" onclick="pasteSelected()">📋 貼付</button>
@@ -732,6 +733,26 @@
                     if (label) label.innerText = noteNames[midi % 12];
                 }
             }
+        });
+    }
+
+    function generateChord() {
+        const selected = Array.from(document.querySelectorAll('.note-block.selected'));
+        if (selected.length === 0) { alert("和音にしたいバーを選択してください"); return; }
+        saveHistory();
+        selected.forEach(el => {
+            const baseMidi = parseInt(el.dataset.midi);
+            const top = parseFloat(el.style.top);
+            const height = parseFloat(el.style.height);
+            const inst = el.dataset.inst;
+            
+            [4, 7].forEach(offset => {
+                const newMidi = baseMidi + offset;
+                if (newMidi <= 83) {
+                    const newBlock = createNoteElement(newMidi, top, height, inst);
+                    if (newBlock) laneContents[inst].appendChild(newBlock);
+                }
+            });
         });
     }
 
