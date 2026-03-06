@@ -719,7 +719,10 @@
         block.className = 'note-block';
         const currentInst = inst || document.getElementById('currentInst').value;
         const keyEl = document.getElementById(`key-${currentInst}-${num}`);
-        if (!keyEl) return null;
+        if (!keyEl) {
+            console.error(`Key not found: key-${currentInst}-${num}`);
+            return null;
+        }
         const rect = keyEl.getBoundingClientRect();
         const contentRect = laneContents[currentInst].getBoundingClientRect();
         
@@ -966,8 +969,19 @@
         });
         
         const num = parseInt(closest.id.split('-').pop());
-        const label = el.querySelector('.note-label'); if (label) label.innerText = noteNames[num % 12];
-        el.style.backgroundColor = getInstColor(inst, num);
+        const label = el.querySelector('.note-label');
+        let labelText = noteNames[num % 12];
+        let bgColor = getInstColor(inst, num);
+
+        if (inst === 'drums') {
+            if (num === 36) { labelText = "ドン"; bgColor = "#f44336"; }
+            else if (num === 38) { labelText = "タン"; bgColor = "#2196f3"; }
+            else if (num === 42) { labelText = "チッ"; bgColor = "#ffeb3b"; el.style.color = "#000"; }
+            else { labelText = "🥁"; }
+        }
+
+        if (label) label.innerText = labelText;
+        el.style.backgroundColor = bgColor;
         el.style.left = (closest.getBoundingClientRect().left - contentRect.left) + 'px';
         el.style.width = (closest.getBoundingClientRect().width - 2) + 'px';
         el.dataset.midi = num;
