@@ -534,8 +534,20 @@
 
         if (noteNum !== -1) {
             if (noteNum === lastNoteNumber && currentBlock) {
+                const oldH = parseFloat(currentBlock.style.height);
                 const h = currentTop - parseFloat(currentBlock.style.top);
-                currentBlock.style.height = Math.max(4, h) + 'px';
+                const actualH = Math.max(4, h);
+                const deltaH = actualH - oldH;
+                currentBlock.style.height = actualH + 'px';
+                
+                // 入力中に後ろの音符を押し出す
+                const blockTop = parseFloat(currentBlock.style.top);
+                document.querySelectorAll('.note-block').forEach(b => {
+                    if (b === currentBlock) return;
+                    if (parseFloat(b.style.top) >= blockTop + oldH - 1) {
+                        b.style.top = (parseFloat(b.style.top) + deltaH) + 'px';
+                    }
+                });
             } else if (noteNum >= 36 && noteNum <= 83) { 
                 addLogBlock(noteNum, currentTop); 
                 lastNoteNumber = noteNum; 
@@ -582,11 +594,18 @@
 
     function makeInteractive(el, resizer) {
         let isDragging = false, isResizing = false, hasMoved = false;
-        let startY, startH, startMouseX, startMouseY, selectedNotes = [];
+        let startY, startH, startTop, startMouseX, startMouseY, selectedNotes = [], allOtherNotes = [];
+        
         resizer.addEventListener('mousedown', (e) => {
-            saveHistory(); isResizing = true; startY = e.clientY; startH = parseInt(el.style.height);
+            saveHistory(); isResizing = true; startY = e.clientY; 
+            startH = parseInt(el.style.height); startTop = parseFloat(el.style.top);
+            // リサイズ開始時に他の全ての音符の状態を記録
+            allOtherNotes = Array.from(document.querySelectorAll('.note-block')).map(b => ({
+                el: b, initialTop: parseFloat(b.style.top)
+            }));
             e.stopPropagation(); e.preventDefault();
         });
+        
         el.addEventListener('mousedown', (e) => {
             if (isResizing) return;
             isDragging = true; hasMoved = false; startMouseX = e.clientX; startMouseY = e.clientY;
@@ -599,8 +618,21 @@
             }));
             e.stopPropagation();
         });
+
         const onMouseMove = (e) => {
-            if (isResizing) { el.style.height = Math.max(15, startH + (e.clientY - startY)) + 'px'; } 
+            if (isResizing) { 
+                const newH = Math.max(15, startH + (e.clientY - startY));
+                const deltaH = newH - startH;
+                el.style.height = newH + 'px';
+                
+                // 後ろの音符を一斉にずらす
+                allOtherNotes.forEach(note => {
+                    if (note.el === el) return;
+                    if (note.initialTop >= startTop + startH - 1) {
+                        note.el.style.top = (note.initialTop + deltaH) + 'px';
+                    }
+                });
+            } 
             else if (isDragging) {
                 const dx = e.clientX - startMouseX, dy = e.clientY - startMouseY;
                 if (!hasMoved && (Math.abs(dx) > 5 || Math.abs(dy) > 5)) { saveHistory(); hasMoved = true; }
@@ -611,7 +643,7 @@
                 });
             }
         };
-        const onMouseUp = () => { isDragging = false; isResizing = false; selectedNotes = []; };
+        const onMouseUp = () => { isDragging = false; isResizing = false; selectedNotes = []; allOtherNotes = []; };
         document.addEventListener('mousemove', onMouseMove); document.addEventListener('mouseup', onMouseUp);
     }
 
