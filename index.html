@@ -39,7 +39,7 @@
         .note-block { position: absolute; border-radius: 4px; font-size: 11px; font-weight: bold; color: white; display: flex; justify-content: center; align-items: center; cursor: grab; user-select: none; box-shadow: 0 0 5px rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); min-height: 15px; }
         
         .resizer { 
-            position: absolute; bottom: 0; left: 0; width: 100%; height: 15px; 
+            position: absolute; bottom: 0; left: 0; width: 100%; height: 8px; 
             cursor: ns-resize; background: rgba(255,255,255,0.25); border-radius: 0 0 4px 4px; 
             z-index: 20; 
         }
@@ -47,6 +47,11 @@
 
         .note-block.selected { border: 2px solid yellow; box-shadow: 0 0 10px yellow; z-index: 50; }
         .note-block.playing { border: 3px solid white; box-shadow: 0 0 20px white; z-index: 100; background-color: #fff !important; color: #000; }
+        
+        .marquee {
+            position: absolute; border: 1px solid #2196f3; background: rgba(33, 150, 243, 0.2);
+            pointer-events: none; z-index: 3000;
+        }
         
         #playhead {
             position: absolute; left: 0; width: 100%; height: 2px; background: red;
@@ -73,6 +78,8 @@
         <button class="btn" style="background:#673ab7;" onclick="redo()">↪ 進む</button>
         <button class="btn" style="background:#2196f3;" onclick="mergeSelected()">合体</button>
         <button class="btn" style="background:#9c27b0;" onclick="splitSelected()">分割</button>
+        <button class="btn" style="background:#ff5722;" onclick="shiftOctave(1)">⬆ オクターブ</button>
+        <button class="btn" style="background:#ff5722;" onclick="shiftOctave(-1)">⬇ オクターブ</button>
         <button class="btn" style="background:#f44336;" onclick="deleteSelected()">消去</button>
         <button class="btn" style="background:#607d8b;" onclick="copySelected()">📄 コピー</button>
         <button class="btn" style="background:#607d8b;" onclick="pasteSelected()">📋 貼付</button>
@@ -170,11 +177,57 @@
         const content = document.createElement('div');
         content.className = 'lane-content';
         content.id = `content-${instId}`;
+        
+        let isMarquee = false, marqueeEl = null, startX, startY;
         content.addEventListener('mousedown', (e) => {
             if (e.target === content) {
                 const rect = content.getBoundingClientRect();
-                const clickY = e.clientY - rect.top + content.scrollTop;
-                syncPlayhead(clickY);
+                startX = e.clientX; startY = e.clientY;
+                const clickY = startY - rect.top + content.scrollTop;
+                
+                if (!e.ctrlKey && !e.shiftKey) {
+                    document.querySelectorAll('.note-block.selected').forEach(b => b.classList.remove('selected'));
+                }
+                
+                isMarquee = true;
+                marqueeEl = document.createElement('div');
+                marqueeEl.className = 'marquee';
+                content.appendChild(marqueeEl);
+                
+                const onMouseMove = (me) => {
+                    if (!isMarquee) return;
+                    const curX = me.clientX, curY = me.clientY;
+                    const left = Math.min(startX, curX) - rect.left;
+                    const top = Math.min(startY, curY) - rect.top + content.scrollTop;
+                    const width = Math.abs(curX - startX);
+                    const height = Math.abs(curY - startY);
+                    marqueeEl.style.left = left + 'px'; marqueeEl.style.top = top + 'px';
+                    marqueeEl.style.width = width + 'px'; marqueeEl.style.height = height + 'px';
+                    
+                    content.querySelectorAll('.note-block').forEach(b => {
+                        const bRect = {
+                            l: parseFloat(b.style.left), t: parseFloat(b.style.top),
+                            w: parseFloat(b.style.width), h: parseFloat(b.style.height)
+                        };
+                        if (bRect.l < left + width && bRect.l + bRect.w > left &&
+                            bRect.t < top + height && bRect.t + bRect.h > top) {
+                            b.classList.add('selected');
+                        } else if (!e.ctrlKey && !e.shiftKey) {
+                            b.classList.remove('selected');
+                        }
+                    });
+                };
+                const onMouseUp = () => {
+                    if (isMarquee) {
+                        if (marqueeEl) marqueeEl.remove();
+                        if (Math.abs(e.clientX - startX) < 5 && Math.abs(e.clientY - startY) < 5) syncPlayhead(clickY);
+                        isMarquee = false; marqueeEl = null;
+                    }
+                    document.removeEventListener('mousemove', onMouseMove);
+                    document.removeEventListener('mouseup', onMouseUp);
+                };
+                document.addEventListener('mousemove', onMouseMove);
+                document.addEventListener('mouseup', onMouseUp);
             }
         });
         
@@ -182,6 +235,18 @@
         wrapper.appendChild(lane);
         trackLanes[instId] = lane;
         laneContents[instId] = content;
+    });
+
+    window.addEventListener('keydown', (e) => {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+        if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected();
+        if (e.key === 'a' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            document.querySelectorAll('.note-block').forEach(b => b.classList.add('selected'));
+        }
+        if (e.key === 'Escape') {
+            document.querySelectorAll('.note-block.selected').forEach(b => b.classList.remove('selected'));
+        }
     });
     
     // 最初のレーンに再生バーを入れる
@@ -647,19 +712,46 @@
         document.addEventListener('mousemove', onMouseMove); document.addEventListener('mouseup', onMouseUp);
     }
 
+    function shiftOctave(delta) {
+        saveHistory();
+        const selected = document.querySelectorAll('.note-block.selected');
+        if (selected.length === 0) return;
+        selected.forEach(el => {
+            let midi = parseInt(el.dataset.midi) + (delta * 12);
+            if (midi >= 36 && midi <= 83) {
+                el.dataset.midi = midi;
+                const inst = el.dataset.inst;
+                const keyEl = document.getElementById(`key-${inst}-${midi}`);
+                const contentRect = laneContents[inst].getBoundingClientRect();
+                if (keyEl) {
+                    const rect = keyEl.getBoundingClientRect();
+                    el.style.left = (rect.left - contentRect.left) + 'px';
+                    el.style.width = (rect.width - 2) + 'px';
+                    el.style.backgroundColor = getInstColor(inst, midi);
+                    const label = el.querySelector('.note-label');
+                    if (label) label.innerText = noteNames[midi % 12];
+                }
+            }
+        });
+    }
+
     function updateLabel(el) {
         const inst = el.dataset.inst;
         const keys = Array.from(laneContents[inst].parentElement.querySelectorAll('.key'));
         const contentRect = laneContents[inst].getBoundingClientRect();
+        
         let closest = keys.reduce((prev, curr) => {
             const prevDist = Math.abs((prev.getBoundingClientRect().left - contentRect.left) - parseFloat(el.style.left));
             const currDist = Math.abs((curr.getBoundingClientRect().left - contentRect.left) - parseFloat(el.style.left));
             return currDist < prevDist ? curr : prev;
         });
+        
         const num = parseInt(closest.id.split('-').pop());
         const label = el.querySelector('.note-label'); if (label) label.innerText = noteNames[num % 12];
         el.style.backgroundColor = getInstColor(inst, num);
-        el.style.left = (closest.getBoundingClientRect().left - contentRect.left) + 'px'; el.dataset.midi = num;
+        el.style.left = (closest.getBoundingClientRect().left - contentRect.left) + 'px';
+        el.style.width = (closest.getBoundingClientRect().width - 2) + 'px';
+        el.dataset.midi = num;
     }
 
     function mergeSelected() {
