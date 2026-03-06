@@ -131,6 +131,14 @@
             </select>
         </label>
         <button class="btn" style="background:#00e676; color: black; padding: 2px 8px;" onclick="detectKeyFromMelody()">🔍 キー判定</button>
+        <span style="margin: 0 10px; border-left: 1px solid #555;"></span>
+        <select id="progSelect" class="btn" style="background:#333; color:white; border:1px solid #2196f3; padding: 2px 5px; font-size: 11px;">
+            <option value="canon">カノン進行</option>
+            <option value="pop">王道進行 (4536)</option>
+            <option value="komuro">小室進行 (6451)</option>
+            <option value="simple">基本 (1451)</option>
+        </select>
+        <button class="btn" style="background:#2196f3;" onclick="generateProgression()">✨ 進行生成</button>
     </div>
     
     <div id="tracks-wrapper">
@@ -994,6 +1002,65 @@
         let d=0; while (c[d]>c[d+1]) d++;
         let maxval=-1, maxpos=-1; for (let i=d; i<SIZE; i++) if (c[i] > maxval) { maxval = c[i]; maxpos = i; }
         return sampleRate/maxpos;
+    }
+
+    function generateProgression() {
+        const type = document.getElementById('progSelect').value;
+        const baseKey = parseInt(document.getElementById('keySelect').value);
+        saveHistory();
+        const progressions = {
+            canon: [0, 4, 5, 2, 3, 0, 3, 4], 
+            pop: [3, 4, 2, 5],              
+            komuro: [5, 3, 4, 0],           
+            simple: [0, 3, 4, 0]            
+        };
+        const scaleSteps = [0, 2, 4, 5, 7, 9, 11]; 
+        const chordDegrees = progressions[type];
+        const barLength = pps * 2; 
+        
+        // 選択されているノートがあれば、その「歌い出し」に合わせる
+        const selected = document.querySelectorAll('.note-block.selected');
+        let startTop = parseFloat(playhead.style.top) || 0;
+        if (selected.length > 0) {
+            startTop = Math.min(...Array.from(selected).map(b => parseFloat(b.style.top)));
+        }
+        
+        if (startTop > 50000) startTop = 0; // 異常値ガード
+        let currentTop = startTop;
+
+        chordDegrees.forEach(degreeIdx => {
+            const bassMidi = baseKey + scaleSteps[degreeIdx] + 36;
+            const b = createNoteElement(bassMidi, currentTop, barLength, 'bass');
+            if (b && laneContents['bass']) laneContents['bass'].appendChild(b);
+            
+            const intervals = [0, 2, 4]; 
+            intervals.forEach(intIdx => {
+                const targetIdx = (degreeIdx + intIdx) % 7;
+                const octaveShift = Math.floor((degreeIdx + intIdx) / 7);
+                const midi = baseKey + scaleSteps[targetIdx] + (octaveShift * 12) + 52;
+                const g = createNoteElement(midi, currentTop, barLength, 'guitar');
+                if (g && laneContents['guitar']) laneContents['guitar'].appendChild(g);
+            });
+            currentTop += barLength;
+        });
+        
+        syncPlayhead(currentTop);
+        Object.values(laneContents).forEach(c => c.scrollTop = startTop - 50); // 少し手前を見せる
+        alert("✨ " + document.getElementById('progSelect').options[document.getElementById('progSelect').selectedIndex].text + " を生成しました！");
+    }
+
+    function detectKeyFromMelody() {
+        const notes = Array.from(document.querySelectorAll('.note-block')).map(b => parseInt(b.dataset.midi) % 12);
+        if (notes.length === 0) { alert("メロディを先に入れてください"); return; }
+        const majorScale = [0, 2, 4, 5, 7, 9, 11];
+        let bestKey = 0, maxScore = -1;
+        for (let key = 0; key < 12; key++) {
+            let score = 0;
+            notes.forEach(n => { if (majorScale.includes((n - key + 12) % 12)) score++; });
+            if (score > maxScore) { maxScore = score; bestKey = key; }
+        }
+        document.getElementById('keySelect').value = bestKey;
+        alert(`推測されるキー: ${document.getElementById('keySelect').options[document.getElementById('keySelect').selectedIndex].text}`);
     }
 </script>
 </body>
