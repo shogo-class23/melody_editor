@@ -470,11 +470,21 @@
     function update() {
         if (!isRunning && pressedKey === -1) return;
         
-        let currentTop = 0;
+        let currentTop;
+        const frameStep = pps / 60; 
+
         if (isRunning) {
             const elapsed = audioCtx.currentTime - recordStartTime;
             currentTop = recordStartTop + (elapsed * pps);
             syncPlayhead(currentTop);
+        } else {
+            if (pressedKey !== -1) {
+                nextTop += frameStep;
+                currentTop = nextTop;
+                syncPlayhead(currentTop);
+            } else {
+                currentTop = nextTop;
+            }
         }
 
         let noteNum = -1;
@@ -516,11 +526,10 @@
 
         if (noteNum !== -1) {
             if (noteNum === lastNoteNumber && currentBlock) {
-                const h = isRunning ? (currentTop - parseFloat(currentBlock.style.top)) : (parseFloat(currentBlock.style.height) + 4);
+                const h = currentTop - parseFloat(currentBlock.style.top);
                 currentBlock.style.height = Math.max(4, h) + 'px';
             } else if (noteNum >= 36 && noteNum <= 83) { 
-                const startY = isRunning ? currentTop : nextTop;
-                addLogBlock(noteNum, startY); 
+                addLogBlock(noteNum, currentTop); 
                 lastNoteNumber = noteNum; 
             }
         } else { lastNoteNumber = -1; currentBlock = null; }
