@@ -91,6 +91,9 @@
             <option value="synth">✨ シンセ</option>
             <option value="flute">🌬️ フルート</option>
         </select>
+        <label style="font-size: 12px; vertical-align: middle; margin-left:10px;">速さ:</label>
+        <input type="range" id="speedSlider" min="40" max="200" value="80" step="10" oninput="updateSpeed(this.value)" style="vertical-align: middle;">
+        <span id="speedValue" style="font-size: 12px; width: 25px; display: inline-block;">80</span>
     </div>
     
     <div id="tracks-wrapper">
@@ -117,8 +120,13 @@
     let silenceFrames = 0;
     const MAX_SILENCE_FRAMES = 5;
     let recordStartTime = 0, recordStartTop = 0;
-    const pps = 80;
+    let pps = 80;
     let countdownTimer = null;
+
+    function updateSpeed(val) {
+        pps = parseInt(val);
+        document.getElementById('speedValue').innerText = val;
+    }
 
     const wrapper = document.getElementById('tracks-wrapper');
     const trackLanes = {};
@@ -674,7 +682,7 @@
         if (allBlocks.length === 0) { playhead.style.top = '0px'; return; }
         isPlaying = true;
         try {
-            const pps = 80, baseTime = audioCtx.currentTime + 0.1, baseTop = startPos;
+            const baseTime = audioCtx.currentTime + 0.1, baseTop = startPos;
             let maxDuration = 0; updatePlayhead(baseTime, baseTop, pps);
             for (const block of allBlocks) {
                 if (!isPlaying) break;
