@@ -758,22 +758,48 @@
     }
 
     function generateBass() {
-        const selected = Array.from(document.querySelectorAll('.note-block.selected'));
+        const selected = Array.from(document.querySelectorAll('.note-block.selected'))
+            .sort((a, b) => parseFloat(a.style.top) - parseFloat(b.style.top));
         if (selected.length === 0) { alert("ベースにしたいメロディを選択してください"); return; }
         saveHistory();
+        
+        const minTop = parseFloat(selected[0].style.top);
+        let maxBottom = 0;
         selected.forEach(el => {
-            const baseMidi = parseInt(el.dataset.midi);
-            const top = parseFloat(el.style.top);
-            const height = parseFloat(el.style.height);
-            
-            // メロディの2オクターブ下をベースにする
-            let bassMidi = baseMidi - 24;
-            // 低すぎると音が鳴らないので、MIDI 36 (低いド) 以上にする
-            while (bassMidi < 36) bassMidi += 12; 
-            
-            const newBlock = createNoteElement(bassMidi, top, height, 'bass');
-            if (newBlock) laneContents['bass'].appendChild(newBlock);
+            const b = parseFloat(el.style.top) + parseFloat(el.style.height);
+            if (b > maxBottom) maxBottom = b;
         });
+
+        let lastMidi = -1;
+        let currentBass = null;
+
+        // 1秒(ppsピクセル)ごとに区切って、その時点のメロディからルート音を決定
+        for (let t = minTop; t < maxBottom; t += pps) {
+            const activeNote = selected.find(el => {
+                const top = parseFloat(el.style.top);
+                const bottom = top + parseFloat(el.style.height);
+                return t >= top && t < bottom;
+            }) || selected.find(el => parseFloat(el.style.top) >= t);
+
+            if (!activeNote) break;
+
+            const midi = parseInt(activeNote.dataset.midi);
+            let bassMidi = midi - 24;
+            while (bassMidi < 36) bassMidi += 12; 
+            while (bassMidi > 48) bassMidi -= 12;
+
+            const duration = Math.min(pps, maxBottom - t);
+
+            if (bassMidi === lastMidi && currentBass) {
+                // 同じルート音が続くなら、今のベースバーを伸ばして合体
+                currentBass.style.height = (parseFloat(currentBass.style.height) + duration) + 'px';
+            } else {
+                // 新しいルート音、または最初の音なら新規作成
+                currentBass = createNoteElement(bassMidi, t, duration, 'bass');
+                if (currentBass) laneContents['bass'].appendChild(currentBass);
+                lastMidi = bassMidi;
+            }
+        }
     }
 
     function updateLabel(el) {
