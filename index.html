@@ -110,6 +110,12 @@
     let audioCtx, analyser, microphone, isRunning = false, nextTop = 10, currentBlock = null, lastNoteNumber = -1;
     let activeNodes = [], isPlaying = false, masterGain;
     let historyStack = [], redoStack = [];
+    let noteHistory = [];
+    const HISTORY_SIZE = 12;
+    let silenceFrames = 0;
+    const MAX_SILENCE_FRAMES = 10;
+    let recordStartTime = 0, recordStartTop = 0;
+    const pps = 80;
 
     const wrapper = document.getElementById('tracks-wrapper');
     const trackLanes = {};
@@ -174,10 +180,10 @@
         return colors[midi % colors.length];
     }
 
-    function updatePlayhead(startTime, baseTop, pps) {
+    function updatePlayhead(startTime, baseTop, ppsValue) {
         if (!isPlaying) return;
         const elapsed = audioCtx.currentTime - startTime;
-        const currentTop = baseTop + (elapsed * pps);
+        const currentTop = baseTop + (elapsed * ppsValue);
         playhead.style.top = currentTop + 'px';
         
         Object.values(laneContents).forEach(content => {
@@ -185,7 +191,7 @@
                 content.scrollTop = currentTop - (content.clientHeight / 2);
             }
         });
-        requestAnimationFrame(() => updatePlayhead(startTime, baseTop, pps));
+        requestAnimationFrame(() => updatePlayhead(startTime, baseTop, ppsValue));
     }
 
     function createOscillator(midi, startTime, duration = -1, inst = null) {
@@ -305,6 +311,7 @@
                 Array.from(content.querySelectorAll('.note-block')).forEach(b => b.remove());
             });
             nextTop = 10; lastNoteNumber = -1; currentBlock = null;
+            syncPlayhead(0);
         }
     }
 
@@ -382,6 +389,8 @@
         await initAudio();
         if (!isRunning) {
             saveHistory();
+            recordStartTime = audioCtx.currentTime;
+            recordStartTop = parseFloat(playhead.style.top) || 0;
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             microphone = stream;
             const source = audioCtx.createMediaStreamSource(stream);
@@ -396,26 +405,70 @@
 
     function update() {
         if (!isRunning && pressedKey === -1) return;
+        
+        let currentTop = 0;
+        if (isRunning) {
+            const elapsed = audioCtx.currentTime - recordStartTime;
+            currentTop = recordStartTop + (elapsed * pps);
+            syncPlayhead(currentTop);
+        }
+
         let noteNum = -1;
-        if (pressedKey !== -1) { noteNum = pressedKey; } 
-        else if (isRunning) {
+        if (pressedKey !== -1) { 
+            noteNum = pressedKey; 
+        } else if (isRunning) {
             const buffer = new Float32Array(analyser.fftSize); analyser.getFloatTimeDomainData(buffer);
             const pitch = autoCorrelate(buffer, audioCtx.sampleRate);
-            if (pitch !== -1) noteNum = Math.round(12 * (Math.log2(pitch / 440)) + 69);
+            if (pitch !== -1) {
+                silenceFrames = 0;
+                let rawNote = Math.round(12 * (Math.log2(pitch / 440)) + 69);
+                noteHistory.push(rawNote);
+                if (noteHistory.length > HISTORY_SIZE) noteHistory.shift();
+                
+                const counts = {};
+                let maxCount = 0;
+                let mostFrequent = -1;
+                for (const n of noteHistory) {
+                    counts[n] = (counts[n] || 0) + 1;
+                    if (counts[n] > maxCount) { maxCount = counts[n]; mostFrequent = n; }
+                }
+
+                let threshold = (lastNoteNumber === -1) ? 0.5 : (mostFrequent === lastNoteNumber ? 0.3 : 0.8);
+                if (maxCount >= Math.ceil(HISTORY_SIZE * threshold)) {
+                    noteNum = mostFrequent;
+                } else {
+                    noteNum = lastNoteNumber;
+                }
+            } else {
+                silenceFrames++;
+                if (silenceFrames < MAX_SILENCE_FRAMES && lastNoteNumber !== -1) {
+                    noteNum = lastNoteNumber;
+                } else {
+                    noteHistory = [];
+                    noteNum = -1;
+                }
+            }
         }
+
         if (noteNum !== -1) {
             if (noteNum === lastNoteNumber && currentBlock) {
-                currentBlock.style.height = (parseInt(currentBlock.style.height) + 4) + 'px';
-            } else if (noteNum >= 48 && noteNum <= 71) { addLogBlock(noteNum); lastNoteNumber = noteNum; }
+                const h = isRunning ? (currentTop - parseFloat(currentBlock.style.top)) : (parseFloat(currentBlock.style.height) + 4);
+                currentBlock.style.height = Math.max(4, h) + 'px';
+            } else if (noteNum >= 48 && noteNum <= 84) { 
+                const startY = isRunning ? currentTop : nextTop;
+                addLogBlock(noteNum, startY); 
+                lastNoteNumber = noteNum; 
+            }
         } else { lastNoteNumber = -1; currentBlock = null; }
+        
         requestAnimationFrame(update);
     }
 
-    function addLogBlock(num) {
+    function addLogBlock(num, topPos) {
         const inst = document.getElementById('currentInst').value;
-        const block = createNoteElement(num, nextTop, 30, inst);
+        const block = createNoteElement(num, topPos, 4, inst);
         laneContents[inst].appendChild(block);
-        currentBlock = block; nextTop += 40;
+        currentBlock = block;
         laneContents[inst].scrollTop = laneContents[inst].scrollHeight;
     }
 
