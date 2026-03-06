@@ -82,6 +82,7 @@
         <button class="btn" style="background:#ff5722;" onclick="shiftOctave(-1)">⬇ オクターブ</button>
         <button class="btn" style="background:#ffc107; color: black;" onclick="generateChord()">✨ 和音作成</button>
         <button class="btn" style="background:#7e57c2;" onclick="generateBass()">🎸 ベース作成</button>
+        <button class="btn" style="background:#ff7043;" onclick="generateGuitar()">🎸 ギター作成</button>
         <button class="btn" style="background:#f44336;" onclick="deleteSelected()">消去</button>
         <button class="btn" style="background:#2196f3;" onclick="selectAllNotes()">✔ 全選択</button>
         <button class="btn" style="background:#607d8b;" onclick="copySelected()">📄 コピー</button>
@@ -806,6 +807,56 @@
                 currentBass = createNoteElement(bassMidi, t, duration, 'bass');
                 if (currentBass) laneContents['bass'].appendChild(currentBass);
                 lastMidi = bassMidi;
+            }
+        }
+    }
+
+    function generateGuitar() {
+        const selected = Array.from(document.querySelectorAll('.note-block.selected'))
+            .sort((a, b) => parseFloat(a.style.top) - parseFloat(b.style.top));
+        if (selected.length === 0) { alert("ギター伴奏にしたいメロディを選択してください"); return; }
+        saveHistory();
+        
+        const minTop = parseFloat(selected[0].style.top);
+        let maxBottom = 0;
+        selected.forEach(el => {
+            const b = parseFloat(el.style.top) + parseFloat(el.style.height);
+            if (b > maxBottom) maxBottom = b;
+        });
+
+        let lastMidi = -1;
+        let currentChords = [];
+
+        for (let t = minTop; t < maxBottom; t += pps) {
+            const activeNote = selected.find(el => {
+                const top = parseFloat(el.style.top);
+                const bottom = top + parseFloat(el.style.height);
+                return t >= top && t < bottom;
+            }) || selected.find(el => parseFloat(el.style.top) >= t);
+
+            if (!activeNote) break;
+
+            const midi = parseInt(activeNote.dataset.midi);
+            let rootMidi = midi - 12; 
+            while (rootMidi < 48) rootMidi += 12; 
+            while (rootMidi > 60) rootMidi -= 12;
+
+            const duration = Math.min(pps, maxBottom - t);
+
+            if (rootMidi === lastMidi && currentChords.length > 0) {
+                currentChords.forEach(c => {
+                    c.style.height = (parseFloat(c.style.height) + duration) + 'px';
+                });
+            } else {
+                currentChords = [];
+                [0, 4, 7].forEach(offset => {
+                    const b = createNoteElement(rootMidi + offset, t, duration, 'guitar');
+                    if (b) {
+                        laneContents['guitar'].appendChild(b);
+                        currentChords.push(b);
+                    }
+                });
+                lastMidi = rootMidi;
             }
         }
     }
