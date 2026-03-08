@@ -26,11 +26,16 @@
             position: sticky; top: 0; background: #222; z-index: 500; 
             border-bottom: 2px solid #444; flex-shrink: 0;
         }
-        .track-label { padding: 5px; font-weight: bold; color: #fff; background: #444; font-size: 14px; }
+        .track-label { padding: 5px; font-weight: bold; color: #fff; font-size: 14px; text-shadow: 1px 1px 2px #000; }
 
         /* 音符を置くエリア */
         .lane-content { 
             position: relative; flex-grow: 1; overflow-y: auto; background: #000;
+            /* 小節線・拍線のグリッド背景 */
+            background-image: 
+                linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px),
+                linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px);
+            background-size: 100% 320px, 100% 80px; 
             scrollbar-width: thin;
         }
         .lane-content::-webkit-scrollbar { width: 8px; }
@@ -74,7 +79,6 @@
             width: 100px; background: #222; border-right: 2px solid #444; 
             display: flex; flex-direction: column; flex-shrink: 0; z-index: 1000;
         }
-        /* z-indexを箱(10)より高くし、高さを右側(約65px)に合わせる */
         #section-header { 
             height: 65px; background: #333; border-bottom: 2px solid #444; 
             display: flex; align-items: center; justify-content: center; 
@@ -97,7 +101,6 @@
             position: absolute; left: 0; width: 10000px; border-top: 2px dashed rgba(255, 255, 255, 0.8);
             z-index: 5000; pointer-events: auto; cursor: pointer;
         }
-        /* 白い線の当たり判定を広げる（クリックしやすくするため） */
         .section-line::after {
             content: ""; position: absolute; top: -10px; left: 0; width: 100%; height: 20px;
         }
@@ -128,7 +131,6 @@
             <option value="7">7和音</option>
         </select>
         <button class="btn" style="background:#f44336;" onclick="deleteSelected()">消去</button>
-        <button class="btn" style="background:#2196f3;" onclick="selectAllNotes()">✔ 全選択</button>
         <button class="btn" style="background:#607d8b;" onclick="copySelected()">📄 コピー</button>
         <button class="btn" style="background:#607d8b;" onclick="pasteSelected()">📋 貼付</button>
         <span style="margin: 0 10px; border-left: 1px solid #555;"></span>
@@ -139,6 +141,7 @@
         <span style="margin: 0 10px; border-left: 1px solid #555;"></span>
         <label style="font-size: 12px; vertical-align: middle;">現在の楽器:</label>
         <select id="currentInst" class="btn" style="background:#333; color:white; border:1px solid #ff9800;">
+            <option value="melody" selected>🎹 メロディー</option>
             <option value="piano">🎹 ピアノ</option>
             <option value="guitar">🎸 ギター</option>
             <option value="bass">🎸 ベース</option>
@@ -188,20 +191,19 @@
     <div id="editor-layout">
         <div id="section-sidebar">
             <div id="section-header">構成</div>
-            <div id="section-container" style="position: relative; flex-grow: 1; overflow: hidden; background: #1a1a1a;">
+            <div id="section-container">
                 <div id="section-inner" style="position: absolute; top: 0; left: 0; width: 100%;"></div>
             </div>
         </div>
-        <div id="tracks-wrapper">
-            <!-- JSで各楽器のレーンを生成 -->
-        </div>
+        <div id="tracks-wrapper"></div>
     </div>
 </div>
 
 <script>
     const noteNames = ["ド", "ド#", "レ", "レ#", "ミ", "ファ", "ファ#", "ソ", "ソ#", "ラ", "ラ#", "シ"];
     const instrumentConfigs = {
-        piano: { name: "🎹 ピアノ", colors: ["#448AFF", "#2979FF", "#2962FF", "#1565C0"] },
+        melody: { name: "🎹 メロディー", colors: ["#448AFF", "#2979FF", "#2962FF", "#1565C0"] },
+        piano: { name: "🎹 ピアノ", colors: ["#FF4081", "#F50057", "#C51162", "#880E4F"] },
         guitar: { name: "🎸 ギター", colors: ["#FF7043", "#F4511E", "#E64A19", "#BF360C"] },
         bass: { name: "🎸 ベース", colors: ["#7E57C2", "#673AB7", "#5E35B1", "#512DA8"] },
         drums: { name: "🥁 ドラム", colors: ["#757575", "#616161", "#424242", "#212121"] },
@@ -223,12 +225,22 @@
     function updateSpeed(val) {
         pps = parseInt(val);
         document.getElementById('speedValue').innerText = val;
+        // 小節線と拍線のグリッドを更新
+        document.querySelectorAll('.lane-content').forEach(c => {
+            c.style.backgroundSize = `100% ${pps * 4}px, 100% ${pps}px`;
+        });
     }
 
     const wrapper = document.getElementById('tracks-wrapper');
     const trackLanes = {};
     const laneContents = {};
     let currentPlayheadY = 0;
+
+    function syncPlayhead(y) {
+        currentPlayheadY = y;
+        document.querySelectorAll('.playhead').forEach(ph => ph.style.top = y + 'px');
+        nextTop = y;
+    }
 
     function rewindToStart() {
         syncPlayhead(0);
@@ -240,15 +252,14 @@
         lane.className = 'track-lane';
         lane.id = `lane-${instId}`;
         
-        // ヘッダー（ラベル＋鍵盤）を上部に固定
         const header = document.createElement('div');
         header.className = 'track-header';
-        header.innerHTML = `<div class="track-label" style="cursor:pointer;" title="クリックでこの楽器を全選択">${instrumentConfigs[instId].name}</div>`;
+        const mainColor = instrumentConfigs[instId].colors[0];
+        header.innerHTML = `<div class="track-label" style="cursor:pointer; background: ${mainColor}cc;" title="クリックでこの楽器を全選択">${instrumentConfigs[instId].name}</div>`;
         
         header.querySelector('.track-label').addEventListener('click', () => {
-            // 他の選択を解除
+            document.getElementById('currentInst').value = instId;
             document.querySelectorAll('.note-block.selected').forEach(b => b.classList.remove('selected'));
-            // このレーンの音符のみ全選択
             laneContents[instId].querySelectorAll('.note-block').forEach(b => b.classList.add('selected'));
         });
         
@@ -259,178 +270,104 @@
             const drumMap = { 36: "ドン", 38: "タン", 42: "チッ" };
             [36, 38, 42].forEach(num => {
                 const div = document.createElement('div');
-                div.id = `key-${instId}-${num}`;
-                div.className = 'key drum-key';
-                div.style.minWidth = "80px";
-                div.innerText = drumMap[num];
-                div.addEventListener('mousedown', (e) => {
-                    e.preventDefault();
-                    document.getElementById('currentInst').value = instId;
-                    startKeyNote(num);
-                });
+                div.id = `key-${instId}-${num}`; div.className = 'key drum-key';
+                div.style.minWidth = "80px"; div.innerText = drumMap[num];
+                div.addEventListener('mousedown', (e) => { e.preventDefault(); document.getElementById('currentInst').value = instId; startKeyNote(num); });
                 pianoContainer.appendChild(div);
             });
         } else {
             for (let i = 0; i < 48; i++) {
-                const div = document.createElement('div');
-                const num = i + 36;
-                div.id = `key-${instId}-${num}`;
-                div.className = [1, 3, 6, 8, 10].includes(i % 12) ? 'key black' : 'key';
-                div.addEventListener('mousedown', (e) => {
-                    e.preventDefault();
-                    document.getElementById('currentInst').value = instId;
-                    startKeyNote(num);
-                });
+                const div = document.createElement('div'); const num = i + 36;
+                div.id = `key-${instId}-${num}`; div.className = [1, 3, 6, 8, 10].includes(i % 12) ? 'key black' : 'key';
+                div.addEventListener('mousedown', (e) => { e.preventDefault(); document.getElementById('currentInst').value = instId; startKeyNote(num); });
                 pianoContainer.appendChild(div);
             }
         }
         header.appendChild(pianoContainer);
         lane.appendChild(header);
 
-        // 音符コンテンツエリア
         const content = document.createElement('div');
-        content.className = 'lane-content';
-        content.id = `content-${instId}`;
+        content.className = 'lane-content'; content.id = `content-${instId}`;
         
         let isMarquee = false, marqueeEl = null, startX, startY;
         content.addEventListener('mousedown', (e) => {
             if (e.target === content) {
                 const rect = content.getBoundingClientRect();
                 startX = e.clientX; startY = e.clientY;
-                const clickY = startY - rect.top + content.scrollTop;
-                
-                if (!e.ctrlKey && !e.shiftKey) {
-                    document.querySelectorAll('.note-block.selected').forEach(b => b.classList.remove('selected'));
-                }
-                
-                isMarquee = true;
-                marqueeEl = document.createElement('div');
-                marqueeEl.className = 'marquee';
-                content.appendChild(marqueeEl);
+                isMarquee = true; marqueeEl = document.createElement('div');
+                marqueeEl.className = 'marquee'; content.appendChild(marqueeEl);
                 
                 const onMouseMove = (me) => {
                     if (!isMarquee) return;
                     const curX = me.clientX, curY = me.clientY;
                     const left = Math.min(startX, curX) - rect.left;
                     const top = Math.min(startY, curY) - rect.top + content.scrollTop;
-                    const width = Math.abs(curX - startX);
-                    const height = Math.abs(curY - startY);
+                    const width = Math.abs(curX - startX), height = Math.abs(curY - startY);
                     marqueeEl.style.left = left + 'px'; marqueeEl.style.top = top + 'px';
                     marqueeEl.style.width = width + 'px'; marqueeEl.style.height = height + 'px';
-                    
                     content.querySelectorAll('.note-block').forEach(b => {
-                        const bRect = {
-                            l: parseFloat(b.style.left), t: parseFloat(b.style.top),
-                            w: parseFloat(b.style.width), h: parseFloat(b.style.height)
-                        };
-                        if (bRect.l < left + width && bRect.l + bRect.w > left &&
-                            bRect.t < top + height && bRect.t + bRect.h > top) {
-                            b.classList.add('selected');
-                        } else if (!e.ctrlKey && !e.shiftKey) {
-                            b.classList.remove('selected');
-                        }
+                        const bl = parseFloat(b.style.left), bt = parseFloat(b.style.top), bw = parseFloat(b.style.width), bh = parseFloat(b.style.height);
+                        if (bl < left+width && bl+bw > left && bt < top+height && bt+bh > top) b.classList.add('selected');
+                        else if (!e.ctrlKey) b.classList.remove('selected');
                     });
                 };
                 const onMouseUp = (me) => {
                     if (isMarquee) {
-                        if (marqueeEl) marqueeEl.remove();
-                        // 移動制限を解除：ドラッグ操作の後でも、マウスを離した位置へ再生バーを移動させます
-                        const rect = content.getBoundingClientRect();
+                        marqueeEl.remove();
                         const endY = me.clientY - rect.top + content.scrollTop;
-                        
-                        // 白い線（セクション境界）の近くをクリックした場合はピタッと吸着（スナップ）させる
-                        let finalY = endY;
-                        const snapThreshold = 15;
+                        let finalY = endY; const snapT = 15;
                         document.querySelectorAll('.section-block').forEach(sb => {
-                            const sTop = parseFloat(sb.style.top);
-                            const sBottom = sTop + parseFloat(sb.style.height);
-                            if (Math.abs(endY - sTop) < snapThreshold) finalY = sTop;
-                            else if (Math.abs(endY - sBottom) < snapThreshold) finalY = sBottom;
+                            const t = parseFloat(sb.style.top), b = t + parseFloat(sb.style.height);
+                            if (Math.abs(endY - t) < snapT) finalY = t; else if (Math.abs(endY - b) < snapT) finalY = b;
                         });
-                        syncPlayhead(finalY);
-
-                        isMarquee = false; marqueeEl = null;
+                        syncPlayhead(finalY); isMarquee = false;
                     }
-                    document.removeEventListener('mousemove', onMouseMove);
-                    document.removeEventListener('mouseup', onMouseUp);
+                    document.removeEventListener('mousemove', onMouseMove); document.removeEventListener('mouseup', onMouseUp);
                 };
-                document.addEventListener('mousemove', onMouseMove);
-                document.addEventListener('mouseup', onMouseUp);
+                document.addEventListener('mousemove', onMouseMove); document.addEventListener('mouseup', onMouseUp);
             }
         });
         
         lane.appendChild(content);
-
-        // 各レーンに再生バーを追加（赤いバーが一番右まで進むように）
-        const ph = document.createElement('div');
-        ph.className = 'playhead';
-        content.appendChild(ph);
-
-        // スクロール同期の追加
+        const ph = document.createElement('div'); ph.className = 'playhead'; content.appendChild(ph);
         content.onscroll = () => {
             const st = content.scrollTop;
             Object.values(laneContents).forEach(c => { if(c !== content) c.scrollTop = st; });
-            // 箱が入っているインナーエリアだけを上にずらす
             document.getElementById('section-inner').style.transform = `translateY(-${st}px)`;
         };
-        
         wrapper.appendChild(lane);
-        trackLanes[instId] = lane;
-        laneContents[instId] = content;
+        trackLanes[instId] = lane; laneContents[instId] = content;
     });
 
-    window.addEventListener('keydown', (e) => {
-        if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-        if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected();
-        if (e.key === 'a' && (e.ctrlKey || e.metaKey)) {
-            e.preventDefault();
-            document.querySelectorAll('.note-block').forEach(b => b.classList.add('selected'));
-        }
-        if (e.key === 'Escape') {
-            document.querySelectorAll('.note-block.selected').forEach(b => b.classList.remove('selected'));
-        }
-    });
-
-    function syncPlayhead(y) {
-        currentPlayheadY = y;
-        document.querySelectorAll('.playhead').forEach(ph => ph.style.top = y + 'px');
-        nextTop = y; // キーボード入力の開始位置も同期
+    function detectKeyFromMelody() {
+        const blocks = Array.from(document.querySelectorAll('.note-block'));
+        if (blocks.length === 0) return;
+        const counts = new Array(12).fill(0);
+        blocks.forEach(b => counts[parseInt(b.dataset.midi) % 12]++);
+        let max = 0; for (let i=1; i<12; i++) if (counts[i] > counts[max]) max = i;
+        document.getElementById('keySelect').value = max;
+        alert(`判定結果: キーは ${noteNames[max]} です！`);
     }
 
-    // セクション機能の実装
     function addSection(top, name = "Aメロ", height = 300) {
         const inner = document.getElementById('section-inner');
-        const block = document.createElement('div');
-        block.className = 'section-block';
-        block.style.top = top + 'px';
-        block.style.height = height + 'px';
-        
-        // 名前表示用ラベルを追加
-        const label = document.createElement('span');
-        label.innerText = name;
-        label.style.pointerEvents = 'none'; // 文字が邪魔しないように
-        block.appendChild(label);
-
-        const resizer = document.createElement('div');
-        resizer.className = 'section-resizer';
-        block.appendChild(resizer);
+        const block = document.createElement('div'); block.className = 'section-block';
+        block.style.top = top + 'px'; block.style.height = height + 'px';
+        const label = document.createElement('span'); label.innerText = name; block.appendChild(label);
+        const resizer = document.createElement('div'); resizer.className = 'section-resizer'; block.appendChild(resizer);
 
         const dividers = [];
         Object.values(laneContents).forEach(lane => {
-            const lineT = document.createElement('div'); lineT.className = 'section-line';
-            const lineB = document.createElement('div'); lineB.className = 'section-line';
-            
-            // 白い線をクリックしたときにピタッと赤いバーを移動させる
-            lineT.onclick = (e) => { e.stopPropagation(); syncPlayhead(parseFloat(lineT.style.top)); };
-            lineB.onclick = (e) => { e.stopPropagation(); syncPlayhead(parseFloat(lineB.style.top)); };
-            
-            lane.appendChild(lineT); lane.appendChild(lineB);
-            dividers.push({ top: lineT, bottom: lineB });
+            const lt = document.createElement('div'); lt.className = 'section-line';
+            const lb = document.createElement('div'); lb.className = 'section-line';
+            lt.onclick = (e) => { e.stopPropagation(); syncPlayhead(parseFloat(lt.style.top)); };
+            lb.onclick = (e) => { e.stopPropagation(); syncPlayhead(parseFloat(lb.style.top)); };
+            lane.appendChild(lt); lane.appendChild(lb); dividers.push({ t: lt, b: lb });
         });
 
         const updateUI = () => {
             const t = parseFloat(block.style.top), h = parseFloat(block.style.height);
-            dividers.forEach(d => { d.top.style.top = t + 'px'; d.bottom.style.top = (t + h) + 'px'; });
+            dividers.forEach(d => { d.t.style.top = t + 'px'; d.b.style.top = (t+h) + 'px'; });
         };
         updateUI();
 
@@ -441,933 +378,264 @@
             e.stopPropagation();
         };
         window.addEventListener('mousemove', (e) => {
-            if (isDrag) { 
-                let newTop = startTop + (e.clientY - startY);
-                
-                // 隣接する箱との衝突判定
-                let minBound = 0;
-                let maxBound = Infinity;
-                const allBlocks = Array.from(document.querySelectorAll('.section-block'));
-                allBlocks.forEach(other => {
-                    if (other === block) return;
-                    const otherTop = parseFloat(other.style.top);
-                    const otherBottom = otherTop + parseFloat(other.style.height);
-                    
-                    // 自分の上にある箱の底辺を探す
-                    if (otherBottom <= startTop && otherBottom > minBound) minBound = otherBottom;
-                    // 自分の下にある箱の上辺を探す
-                    if (otherTop >= (startTop + startH) && otherTop < maxBound) maxBound = otherTop;
+            if (isDrag) {
+                let nt = startTop + (e.clientY - startY), min = 0, max = Infinity;
+                document.querySelectorAll('.section-block').forEach(o => {
+                    if (o === block) return;
+                    const ot = parseFloat(o.style.top), ob = ot + parseFloat(o.style.height);
+                    if (ob <= startTop && ob > min) min = ob; if (ot >= startTop+startH && ot < max) max = ot;
                 });
-
-                // 上下の範囲内に収める
-                let fixedTop = Math.max(minBound, newTop);
-                if (maxBound !== Infinity) {
-                    fixedTop = Math.min(fixedTop, maxBound - startH);
-                }
-                
-                block.style.top = fixedTop + 'px'; 
-                updateUI(); 
-            }
-            else if (isResize) { 
-                let newHeight = startH + (e.clientY - startY);
-                
-                // 下にある箱との衝突判定
-                let maxH = Infinity;
-                const allBlocks = Array.from(document.querySelectorAll('.section-block'));
-                allBlocks.forEach(other => {
-                    if (other === block) return;
-                    const otherTop = parseFloat(other.style.top);
-                    if (otherTop >= (startTop + startH) && otherTop < (startTop + maxH)) {
-                        maxH = otherTop - startTop;
-                    }
+                let ft = Math.max(min, nt); if (max !== Infinity) ft = Math.min(ft, max-startH);
+                block.style.top = ft + 'px'; updateUI();
+            } else if (isResize) {
+                let nh = startH + (e.clientY - startY), mh = Infinity;
+                document.querySelectorAll('.section-block').forEach(o => {
+                    if (o === block) return;
+                    const ot = parseFloat(o.style.top); if (ot >= startTop+startH && ot < startTop+mh) mh = ot-startTop;
                 });
-
-                let fixedHeight = Math.max(30, newHeight);
-                if (maxH !== Infinity) {
-                    fixedHeight = Math.min(fixedHeight, maxH);
-                }
-                
-                block.style.height = fixedHeight + 'px'; 
-                updateUI(); 
+                let fh = Math.max(30, nh); if (mh !== Infinity) fh = Math.min(fh, mh);
+                block.style.height = fh + 'px'; updateUI();
             }
         });
         window.addEventListener('mouseup', () => { isDrag = isResize = false; });
-        
-        block.onclick = (e) => {
-            if (isDrag || isResize) return;
-            // 選択処理
-            document.querySelectorAll('.section-block.selected').forEach(b => b.classList.remove('selected'));
-            block.classList.add('selected');
-            // 再生位置をこのセクションの開始位置へ
-            syncPlayhead(parseFloat(block.style.top));
-        };
-
-        block.ondblclick = (e) => {
-            e.stopPropagation();
-            const n = prompt("セクション名:", label.innerText);
-            if (n) label.innerText = n;
-        };
-
-        block.oncontextmenu = (e) => { e.preventDefault(); if(confirm("削除？")) { block.remove(); dividers.forEach(d => { d.top.remove(); d.bottom.remove(); }); } };
+        block.onclick = () => { syncPlayhead(parseFloat(block.style.top)); };
+        block.oncontextmenu = (e) => { e.preventDefault(); if(confirm("削除？")) { block.remove(); dividers.forEach(d => { d.t.remove(); d.b.remove(); }); } };
         inner.appendChild(block);
     }
 
     document.getElementById('section-container').ondblclick = (e) => {
-        if (e.target !== document.getElementById('section-container') && e.target !== document.getElementById('section-inner')) return;
-        const rect = document.getElementById('section-container').getBoundingClientRect();
+        const rect = e.currentTarget.getBoundingClientRect();
         const top = e.clientY - rect.top + Object.values(laneContents)[0].scrollTop;
         addSection(top);
     };
 
-    function getInstColor(inst, midi) {
-        const colors = instrumentConfigs[inst].colors;
-        return colors[midi % colors.length];
-    }
+    function getInstColor(inst, midi) { const colors = instrumentConfigs[inst].colors; return colors[midi % colors.length]; }
 
-    function updatePlayhead(startTime, baseTop, ppsValue) {
+    function updatePlayhead(startTime, baseTop, ppsV) {
         if (!isPlaying) return;
-        const elapsed = audioCtx.currentTime - startTime;
-        const currentTop = baseTop + (elapsed * ppsValue);
-        syncPlayhead(currentTop);
-        
-        Object.values(laneContents).forEach(content => {
-            if (currentTop > content.scrollTop + content.clientHeight - 100) {
-                content.scrollTop = currentTop - (content.clientHeight / 2);
-            }
-        });
-        requestAnimationFrame(() => updatePlayhead(startTime, baseTop, ppsValue));
+        const curT = baseTop + (audioCtx.currentTime - startTime) * ppsV;
+        syncPlayhead(curT);
+        Object.values(laneContents).forEach(c => { if (curT > c.scrollTop + c.clientHeight - 100) c.scrollTop = curT - c.clientHeight / 2; });
+        requestAnimationFrame(() => updatePlayhead(startTime, baseTop, ppsV));
     }
 
     function createOscillator(midi, startTime, duration = -1, inst = null) {
         const type = inst || document.getElementById('currentInst').value;
         const freq = 440 * Math.pow(2, (midi - 69) / 12);
-        const g = audioCtx.createGain();
-        const nodes = [];
+        const g = audioCtx.createGain(); const nodes = [];
         g.gain.setValueAtTime(0, startTime);
-
-        if (type === 'piano') {
-            const osc1 = audioCtx.createOscillator(); const osc2 = audioCtx.createOscillator();
-            osc1.type = 'triangle'; osc2.type = 'sine';
-            osc1.frequency.setValueAtTime(freq, startTime); osc2.frequency.setValueAtTime(freq * 2.01, startTime);
-            const g1 = audioCtx.createGain(); g1.gain.value = 1.2;
-            const g2 = audioCtx.createGain(); g2.gain.value = 0.6;
-            const attackTime = 0.01; const release = duration > 0 ? duration : 1.5;
-            g.gain.linearRampToValueAtTime(1.0, startTime + attackTime); 
-            g.gain.exponentialRampToValueAtTime(0.001, startTime + attackTime + release);
-            osc1.connect(g1); g1.connect(g); osc2.connect(g2); g2.connect(g);
-            nodes.push(osc1, osc2); osc1.start(startTime); osc2.start(startTime);
-            if (duration > 0) { osc1.stop(startTime + attackTime + release); osc2.stop(startTime + attackTime + release); }
+        if (type === 'piano' || type === 'melody') {
+            const o1 = audioCtx.createOscillator(), o2 = audioCtx.createOscillator();
+            o1.type = 'triangle'; o2.type = 'sine'; o1.frequency.value = freq; o2.frequency.value = freq * 2.01;
+            const g1 = audioCtx.createGain(), g2 = audioCtx.createGain(); g1.gain.value = 1.0; g2.gain.value = 0.5;
+            const rel = duration > 0 ? duration : 1.5;
+            g.gain.linearRampToValueAtTime(0.8, startTime + 0.01); g.gain.exponentialRampToValueAtTime(0.001, startTime + 0.01 + rel);
+            o1.connect(g1); g1.connect(g); o2.connect(g2); g2.connect(g); nodes.push(o1, o2); o1.start(startTime); o2.start(startTime);
         } else if (type === 'guitar') {
-            const osc = audioCtx.createOscillator(); osc.type = 'sawtooth';
-            osc.frequency.setValueAtTime(freq, startTime);
-            const filter = audioCtx.createBiquadFilter(); filter.type = 'lowpass';
-            filter.frequency.setValueAtTime(4000, startTime); filter.frequency.exponentialRampToValueAtTime(400, startTime + 0.5);
-            g.gain.linearRampToValueAtTime(0.8, startTime + 0.005);
-            const rel = duration > 0 ? duration : 1.2;
-            g.gain.exponentialRampToValueAtTime(0.001, startTime + rel);
-            osc.connect(filter); filter.connect(g);
-            nodes.push(osc); osc.start(startTime);
-            if (duration > 0) osc.stop(startTime + rel);
+            const o = audioCtx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = freq;
+            const f = audioCtx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.setValueAtTime(4000, startTime); f.frequency.exponentialRampToValueAtTime(400, startTime + 0.5);
+            g.gain.linearRampToValueAtTime(0.6, startTime + 0.005); g.gain.exponentialRampToValueAtTime(0.001, startTime + (duration > 0 ? duration : 1.2));
+            o.connect(f); f.connect(g); nodes.push(o); o.start(startTime);
         } else if (type === 'bass') {
-            const osc = audioCtx.createOscillator(); osc.type = 'triangle';
-            osc.frequency.setValueAtTime(freq / 2, startTime); 
-            osc.connect(g); nodes.push(osc); osc.start(startTime);
-            g.gain.linearRampToValueAtTime(0.8, startTime + 0.02);
-            if (duration > 0) {
-                g.gain.linearRampToValueAtTime(0.4, startTime + duration);
-                g.gain.linearRampToValueAtTime(0, startTime + duration + 0.05);
-                osc.stop(startTime + duration + 0.05);
-            } else { g.gain.linearRampToValueAtTime(0.4, startTime + 1.0); }
+            const o = audioCtx.createOscillator(); o.type = 'triangle'; o.frequency.value = freq / 2;
+            g.gain.linearRampToValueAtTime(0.7, startTime + 0.02); o.connect(g); nodes.push(o); o.start(startTime);
+            if (duration > 0) { g.gain.setValueAtTime(0.7, startTime + duration); g.gain.linearRampToValueAtTime(0, startTime + duration + 0.05); }
         } else if (type === 'drums') {
-            if (midi === 36) { // Kick
-                const osc = audioCtx.createOscillator(); osc.type = 'sine';
-                osc.frequency.setValueAtTime(150, startTime); osc.frequency.exponentialRampToValueAtTime(40, startTime + 0.1);
+            if (midi === 36) {
+                const o = audioCtx.createOscillator(); o.type = 'sine'; o.frequency.setValueAtTime(150, startTime); o.frequency.exponentialRampToValueAtTime(40, startTime + 0.1);
                 g.gain.linearRampToValueAtTime(1.0, startTime + 0.01); g.gain.exponentialRampToValueAtTime(0.001, startTime + 0.2);
-                osc.connect(g); nodes.push(osc); osc.start(startTime); osc.stop(startTime + 0.2);
-            } else if (midi === 38) { // Snare
-                const osc = audioCtx.createOscillator(); osc.type = 'triangle';
-                osc.frequency.setValueAtTime(250, startTime);
+                o.connect(g); nodes.push(o); o.start(startTime); o.stop(startTime + 0.2);
+            } else if (midi === 38) {
+                const o = audioCtx.createOscillator(); o.type = 'triangle'; o.frequency.value = 250;
                 g.gain.linearRampToValueAtTime(0.8, startTime + 0.01); g.gain.exponentialRampToValueAtTime(0.001, startTime + 0.1);
-                osc.connect(g); nodes.push(osc); osc.start(startTime); osc.stop(startTime + 0.1);
-                const noise = audioCtx.createBufferSource();
-                const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.1, audioCtx.sampleRate);
-                const d = buf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-                noise.buffer = buf; const ng = audioCtx.createGain();
-                ng.gain.setValueAtTime(0.5, startTime); ng.gain.exponentialRampToValueAtTime(0.001, startTime + 0.1);
-                noise.connect(ng); ng.connect(g); nodes.push(noise); noise.start(startTime); noise.stop(startTime + 0.1);
-            } else { // Hi-hat
-                const noise = audioCtx.createBufferSource();
-                const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.05, audioCtx.sampleRate);
-                const d = buf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-                noise.buffer = buf; const filter = audioCtx.createBiquadFilter(); filter.type = 'highpass'; filter.frequency.value = 7000;
-                const ng = audioCtx.createGain(); ng.gain.setValueAtTime(0.2, startTime); ng.gain.exponentialRampToValueAtTime(0.001, startTime + 0.05);
-                noise.connect(filter); filter.connect(ng); ng.connect(g); nodes.push(noise); noise.start(startTime); noise.stop(startTime + 0.05);
-            }
-        } else if (type === 'flute') {
-            const osc = audioCtx.createOscillator(); osc.type = 'sine'; osc.frequency.setValueAtTime(freq, startTime);
-            osc.connect(g); nodes.push(osc); osc.start(startTime);
-            const lfo = audioCtx.createOscillator(); const lfoGain = audioCtx.createGain();
-            lfo.frequency.value = 5; lfoGain.gain.value = freq * 0.01;
-            lfo.connect(lfoGain); lfoGain.connect(osc.frequency); lfo.start(startTime); nodes.push(lfo);
-            g.gain.linearRampToValueAtTime(0.5, startTime + 0.1);
-            if (duration > 0) {
-                g.gain.linearRampToValueAtTime(0.4, startTime + duration - 0.05);
-                g.gain.linearRampToValueAtTime(0, startTime + duration);
-                osc.stop(startTime + duration); lfo.stop(startTime + duration);
+                o.connect(g); nodes.push(o); o.start(startTime); o.stop(startTime + 0.1);
+                const n = audioCtx.createBufferSource(), b = audioCtx.createBuffer(1, audioCtx.sampleRate*0.1, audioCtx.sampleRate), d = b.getChannelData(0);
+                for(let i=0; i<d.length; i++) d[i]=Math.random()*2-1; n.buffer = b; const ng = audioCtx.createGain();
+                ng.gain.setValueAtTime(0.5, startTime); ng.gain.exponentialRampToValueAtTime(0.001, startTime+0.1);
+                n.connect(ng); ng.connect(g); nodes.push(n); n.start(startTime); n.stop(startTime+0.1);
+            } else {
+                const n = audioCtx.createBufferSource(), b = audioCtx.createBuffer(1, audioCtx.sampleRate*0.05, audioCtx.sampleRate), d = b.getChannelData(0);
+                for(let i=0; i<d.length; i++) d[i]=Math.random()*2-1; n.buffer = b; const f = audioCtx.createBiquadFilter(); f.type='highpass'; f.frequency.value=7000;
+                const ng = audioCtx.createGain(); ng.gain.setValueAtTime(0.2, startTime); ng.gain.exponentialRampToValueAtTime(0.001, startTime+0.05);
+                n.connect(f); f.connect(ng); ng.connect(g); nodes.push(n); n.start(startTime); n.stop(startTime+0.05);
             }
         } else {
-            const osc = audioCtx.createOscillator(); osc.type = 'sawtooth'; osc.frequency.setValueAtTime(freq, startTime);
-            const lowpass = audioCtx.createBiquadFilter(); lowpass.type = 'lowpass'; lowpass.frequency.setValueAtTime(2000, startTime);
-            osc.connect(lowpass); lowpass.connect(g); nodes.push(osc); osc.start(startTime);
-            g.gain.linearRampToValueAtTime(0.3, startTime + 0.02);
-            if (duration > 0) { g.gain.linearRampToValueAtTime(0, startTime + duration); osc.stop(startTime + duration); }
+            const o = audioCtx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = freq;
+            g.gain.linearRampToValueAtTime(0.3, startTime + 0.02); o.connect(g); nodes.push(o); o.start(startTime);
         }
-        g.connect(masterGain);
-        return { g, nodes };
+        g.connect(masterGain); return { g, nodes };
     }
 
-    function getCurrentState() {
-        return Array.from(document.querySelectorAll('.note-block')).map(b => ({
-            midi: b.dataset.midi, inst: b.dataset.inst || 'piano',
-            top: b.style.top, left: b.style.left, height: b.style.height,
-            color: b.style.backgroundColor, text: b.querySelector('.note-label').innerText
-        }));
-    }
-
-    function saveToFile() {
-        const data = JSON.stringify(getCurrentState(), null, 2);
-        const blob = new Blob([data], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = `melody_${new Date().getTime()}.json`;
-        a.click(); URL.revokeObjectURL(url);
-    }
-
-    function loadFromFile() { document.getElementById('fileInput').click(); }
-    function handleFileSelect(event) {
-        const file = event.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            try {
-                const state = JSON.parse(e.target.result);
-                saveHistory(); applyState(state);
-                nextTop = state.reduce((max, b) => Math.max(max, parseFloat(b.top) + parseFloat(b.height) + 10), 10);
-            } catch (err) { alert('失敗'); }
-        };
-        reader.readAsText(file);
-        event.target.value = ''; 
-    }
-
-    function newProject() {
-        if (confirm('消去？')) {
-            saveHistory(); 
-            Object.values(laneContents).forEach(content => {
-                Array.from(content.querySelectorAll('.note-block')).forEach(b => b.remove());
-            });
-            nextTop = 10; lastNoteNumber = -1; currentBlock = null;
-            syncPlayhead(0);
-        }
-    }
-
-    window.addEventListener('mouseup', stopKeyNote);
-
-    async function initAudio() {
-        if (!audioCtx) {
-            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            masterGain = audioCtx.createGain(); masterGain.gain.setValueAtTime(0.7, audioCtx.currentTime); 
-            masterGain.connect(audioCtx.destination);
-        }
-        if (audioCtx.state === 'suspended') await audioCtx.resume();
-    }
+    async function initAudio() { if (!audioCtx) { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); masterGain = audioCtx.createGain(); masterGain.gain.value = 0.7; masterGain.connect(audioCtx.destination); } if (audioCtx.state === 'suspended') await audioCtx.resume(); }
 
     let pressedKey = -1, keyNodes = null, keyGain = null;
     async function startKeyNote(num) {
-        await initAudio();
-        if (pressedKey !== -1) stopKeyNote();
-        pressedKey = num;
-        const { g, nodes } = createOscillator(num, audioCtx.currentTime);
-        keyGain = g; keyNodes = nodes;
-        const inst = document.getElementById('currentInst').value;
-        const keyEl = document.getElementById(`key-${inst}-${num}`);
-        if (keyEl) keyEl.classList.add('active');
-        if (!isRunning) { saveHistory(); update(); }
+        await initAudio(); if (pressedKey !== -1) stopKeyNote(); pressedKey = num;
+        const { g, nodes } = createOscillator(num, audioCtx.currentTime); keyGain = g; keyNodes = nodes;
+        const inst = document.getElementById('currentInst').value, keyEl = document.getElementById(`key-${inst}-${num}`);
+        if (keyEl) keyEl.classList.add('active'); if (!isRunning) { saveHistory(); update(); }
     }
-
     function stopKeyNote() {
-        if (pressedKey === -1) return;
-        const inst = document.getElementById('currentInst').value;
-        if (keyGain && keyNodes) {
-            if (['piano','guitar','bass','flute'].includes(inst)) {
-                keyGain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
-            } else { keyGain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.05); }
-            setTimeout(() => { keyNodes.forEach(n => { try { n.stop(); } catch(e){} }); }, 200);
-        }
-        const keyEl = document.getElementById(`key-${inst}-${pressedKey}`);
-        if (keyEl) keyEl.classList.remove('active');
-        pressedKey = -1; lastNoteNumber = -1; currentBlock = null;
+        if (pressedKey === -1) return; const inst = document.getElementById('currentInst').value;
+        if (keyGain) { keyGain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1); setTimeout(() => { keyNodes.forEach(n => { try { n.stop(); } catch(e){} }); }, 200); }
+        const keyEl = document.getElementById(`key-${inst}-${pressedKey}`); if (keyEl) keyEl.classList.remove('active'); pressedKey = -1; currentBlock = null;
     }
 
-    function saveHistory() {
-        historyStack.push(JSON.stringify(getCurrentState()));
-        if (historyStack.length > 50) historyStack.shift();
-        redoStack = [];
-    }
-
-    function undo() {
-        if (historyStack.length === 0) return;
-        redoStack.push(JSON.stringify(getCurrentState()));
-        applyState(JSON.parse(historyStack.pop()));
-    }
-
-    function redo() {
-        if (redoStack.length === 0) return;
-        historyStack.push(JSON.stringify(getCurrentState()));
-        applyState(JSON.parse(redoStack.pop()));
-    }
-
-    function applyState(state) {
-        Object.values(laneContents).forEach(content => {
-            Array.from(content.querySelectorAll('.note-block')).forEach(b => b.remove());
-        });
-        state.forEach(data => {
-            const inst = data.inst || 'piano';
-            const b = createNoteElement(parseInt(data.midi), parseInt(data.top), parseInt(data.height), inst);
-            b.style.left = data.left; b.style.backgroundColor = data.color;
-            const label = b.querySelector('.note-label');
-            if (label) label.innerText = data.text;
-            laneContents[inst].appendChild(b);
-        });
-    }
-
-    function playBeep(freq, startTime) {
-        const osc = audioCtx.createOscillator();
-        const g = audioCtx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(freq, startTime);
-        g.gain.setValueAtTime(0.1, startTime);
-        g.gain.exponentialRampToValueAtTime(0.001, startTime + 0.1);
-        osc.connect(g);
-        g.connect(audioCtx.destination);
-        osc.start(startTime);
-        osc.stop(startTime + 0.1);
-    }
+    function saveHistory() { historyStack.push(JSON.stringify(Array.from(document.querySelectorAll('.note-block')).map(b => ({ midi: b.dataset.midi, inst: b.dataset.inst, top: b.style.top, left: b.style.left, height: b.style.height, color: b.style.backgroundColor, text: b.querySelector('.note-label').innerText })))); if (historyStack.length > 50) historyStack.shift(); redoStack = []; }
+    function undo() { if (historyStack.length === 0) return; redoStack.push(JSON.stringify(Array.from(document.querySelectorAll('.note-block')).map(b => ({ midi: b.dataset.midi, inst: b.dataset.inst, top: b.style.top, left: b.style.left, height: b.style.height, color: b.style.backgroundColor, text: b.querySelector('.note-label').innerText })))); applyState(JSON.parse(historyStack.pop())); }
+    function applyState(s) { Object.values(laneContents).forEach(c => Array.from(c.querySelectorAll('.note-block')).forEach(b => b.remove())); s.forEach(d => { const b = createNoteElement(parseInt(d.midi), parseInt(d.top), parseInt(d.height), d.inst); b.style.left = d.left; b.style.backgroundColor = d.color; b.querySelector('.note-label').innerText = d.text; laneContents[d.inst].appendChild(b); }); }
 
     async function toggleMic() {
-        await initAudio();
-        const btn = document.getElementById('toggleBtn');
-        
+        await initAudio(); const btn = document.getElementById('toggleBtn');
         if (!isRunning) {
-            if (countdownTimer) return;
-            
-            btn.innerText = "マイク準備中...";
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                microphone = stream;
-            } catch (e) {
-                alert("マイクが使えません");
-                return;
-            }
-
-            let count = 3;
-            btn.style.background = "#f44336";
-            
-            countdownTimer = setInterval(() => {
-                if (count > 0) {
-                    btn.innerText = `準備... ${count}`;
-                    playBeep(440, audioCtx.currentTime);
-                    count--;
-                } else {
-                    clearInterval(countdownTimer);
-                    countdownTimer = null;
-                    playBeep(880, audioCtx.currentTime);
-                    startRecordingAfterReady();
-                }
+            if (countdownTimer) return; btn.innerText = "準備中...";
+            try { microphone = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (e) { alert("マイク不可"); return; }
+            let count = 3; countdownTimer = setInterval(() => {
+                if (count > 0) { btn.innerText = `準備... ${count--}`; } else { clearInterval(countdownTimer); countdownTimer = null; startRecordingAfterReady(); }
             }, 1000);
-            
-            btn.innerText = `準備... ${count}`;
-            playBeep(440, audioCtx.currentTime);
-            count--;
-        } else {
-            stopRecording();
-        }
+        } else { stopRecording(); }
     }
-
-    function startRecordingAfterReady() {
-        saveHistory();
-        const source = audioCtx.createMediaStreamSource(microphone);
-        analyser = audioCtx.createAnalyser(); analyser.fftSize = 2048;
-        source.connect(analyser);
-        recordStartTime = audioCtx.currentTime;
-        recordStartTop = currentPlayheadY;
-        isRunning = true; 
-        document.getElementById('toggleBtn').innerText = "🔴 録音中..."; 
-        update();
-    }
-
-    function stopRecording() {
-        isRunning = false; 
-        if (microphone) microphone.getTracks().forEach(t => t.stop());
-        const btn = document.getElementById('toggleBtn');
-        btn.innerText = "録音開始";
-        btn.style.background = "#4caf50";
-    }
+    function startRecordingAfterReady() { saveHistory(); const s = audioCtx.createMediaStreamSource(microphone); analyser = audioCtx.createAnalyser(); s.connect(analyser); recordStartTime = audioCtx.currentTime; recordStartTop = currentPlayheadY; isRunning = true; document.getElementById('toggleBtn').innerText = "🔴 録音中..."; update(); }
+    function stopRecording() { isRunning = false; if (microphone) microphone.getTracks().forEach(t => t.stop()); document.getElementById('toggleBtn').innerText = "録音開始"; }
 
     function update() {
         if (!isRunning && pressedKey === -1) return;
-        
-        let currentTop;
-        const frameStep = pps / 60; 
-
-        if (isRunning) {
-            const elapsed = audioCtx.currentTime - recordStartTime;
-            currentTop = recordStartTop + (elapsed * pps);
-            syncPlayhead(currentTop);
-        } else {
-            if (pressedKey !== -1) {
-                nextTop += frameStep;
-                currentTop = nextTop;
-                syncPlayhead(currentTop);
-            } else {
-                currentTop = nextTop;
-            }
+        let ct = isRunning ? recordStartTop + (audioCtx.currentTime - recordStartTime) * pps : nextTop + pps/60;
+        if (pressedKey !== -1) nextTop = ct; syncPlayhead(ct);
+        let noteNum = pressedKey;
+        if (isRunning && noteNum === -1) {
+            const buf = new Float32Array(analyser.fftSize); analyser.getFloatTimeDomainData(buf);
+            const pitch = autoCorrelate(buf, audioCtx.sampleRate);
+            if (pitch !== -1) noteNum = Math.round(12 * Math.log2(pitch / 440) + 69);
         }
-
-        let noteNum = -1;
-        if (pressedKey !== -1) { 
-            noteNum = pressedKey; 
-        } else if (isRunning) {
-            const buffer = new Float32Array(analyser.fftSize); analyser.getFloatTimeDomainData(buffer);
-            const pitch = autoCorrelate(buffer, audioCtx.sampleRate);
-            if (pitch !== -1) {
-                silenceFrames = 0;
-                let rawNote = Math.round(12 * (Math.log2(pitch / 440)) + 69);
-                noteHistory.push(rawNote);
-                if (noteHistory.length > HISTORY_SIZE) noteHistory.shift();
-                
-                const counts = {};
-                let maxCount = 0;
-                let mostFrequent = -1;
-                for (const n of noteHistory) {
-                    counts[n] = (counts[n] || 0) + 1;
-                    if (counts[n] > maxCount) { maxCount = counts[n]; mostFrequent = n; }
-                }
-
-                let threshold = (lastNoteNumber === -1) ? 0.5 : (mostFrequent === lastNoteNumber ? 0.3 : 0.8);
-                if (maxCount >= Math.ceil(HISTORY_SIZE * threshold)) {
-                    noteNum = mostFrequent;
-                } else {
-                    noteNum = lastNoteNumber;
-                }
-            } else {
-                silenceFrames++;
-                if (silenceFrames < MAX_SILENCE_FRAMES && lastNoteNumber !== -1) {
-                    noteNum = lastNoteNumber;
-                } else {
-                    noteHistory = [];
-                    noteNum = -1;
-                }
-            }
-        }
-
         if (noteNum !== -1) {
-            if (noteNum === lastNoteNumber && currentBlock) {
-                const oldH = parseFloat(currentBlock.style.height);
-                const h = currentTop - parseFloat(currentBlock.style.top);
-                const actualH = Math.max(4, h);
-                const deltaH = actualH - oldH;
-                currentBlock.style.height = actualH + 'px';
-                
-                // 入力中に後ろの音符を押し出す
-                const blockTop = parseFloat(currentBlock.style.top);
-                document.querySelectorAll('.note-block').forEach(b => {
-                    if (b === currentBlock) return;
-                    if (parseFloat(b.style.top) >= blockTop + oldH - 1) {
-                        b.style.top = (parseFloat(b.style.top) + deltaH) + 'px';
-                    }
-                });
-            } else if (noteNum >= 36 && noteNum <= 83) { 
-                addLogBlock(noteNum, currentTop); 
-                lastNoteNumber = noteNum; 
-            }
+            if (noteNum === lastNoteNumber && currentBlock) { currentBlock.style.height = (ct - parseFloat(currentBlock.style.top)) + 'px'; }
+            else if (noteNum >= 36 && noteNum <= 83) { const inst = document.getElementById('currentInst').value; const b = createNoteElement(noteNum, ct, 4, inst); laneContents[inst].appendChild(b); currentBlock = b; lastNoteNumber = noteNum; }
         } else { lastNoteNumber = -1; currentBlock = null; }
-        
         requestAnimationFrame(update);
     }
 
-    function addLogBlock(num, topPos) {
-        const inst = document.getElementById('currentInst').value;
-        const block = createNoteElement(num, topPos, 4, inst);
-        if (block) {
-            laneContents[inst].appendChild(block);
-            currentBlock = block;
-            laneContents[inst].scrollTop = laneContents[inst].scrollHeight;
-        }
+    function autoCorrelate(buf, sr) {
+        let rms = 0; for (let i=0; i<buf.length; i++) rms += buf[i]*buf[i]; if (Math.sqrt(rms/buf.length) < 0.02) return -1;
+        let c = new Float32Array(buf.length); for (let i=0; i<buf.length; i++) for (let j=0; j<buf.length-i; j++) c[i] += buf[j]*buf[j+i];
+        let d = 0; while (c[d] > c[d+1]) d++; let maxv = -1, maxp = -1; for (let i=d; i<buf.length; i++) if (c[i] > maxv) { maxv = c[i]; maxp = i; }
+        return sr / maxp;
     }
 
-    function createNoteElement(num, top, height, inst = null) {
-        const block = document.createElement('div');
-        block.className = 'note-block';
-        const currentInst = inst || document.getElementById('currentInst').value;
-        const keyEl = document.getElementById(`key-${currentInst}-${num}`);
-        if (!keyEl) {
-            console.error(`Key not found: key-${currentInst}-${num}`);
-            return null;
-        }
-        const rect = keyEl.getBoundingClientRect();
-        const contentRect = laneContents[currentInst].getBoundingClientRect();
-        
-        block.style.width = (rect.width - 2) + 'px';
-        block.style.left = (rect.left - contentRect.left) + 'px';
-        block.style.top = top + 'px';
-        block.style.height = height + 'px';
-        
-        // 楽器ごとの色とラベルの特別処理
-        let labelText = noteNames[num % 12];
-        let bgColor = getInstColor(currentInst, num);
-        
-        if (currentInst === 'drums') {
-            if (num === 36) { labelText = "ドン"; bgColor = "#f44336"; } // Kick
-            else if (num === 38) { labelText = "タン"; bgColor = "#2196f3"; } // Snare
-            else if (num === 42) { labelText = "チッ"; bgColor = "#ffeb3b"; block.style.color = "#000"; } // Hat
-            else { labelText = "🥁"; }
-        }
-        
-        block.style.backgroundColor = bgColor;
-        const label = document.createElement('span');
-        label.className = 'note-label'; label.innerText = labelText;
-        block.appendChild(label);
-        
-        block.dataset.midi = num; block.dataset.inst = currentInst;
-        const resizer = document.createElement('div');
-        resizer.className = 'resizer'; block.appendChild(resizer);
-        makeInteractive(block, resizer);
-        return block;
+    function createNoteElement(num, top, height, inst) {
+        const b = document.createElement('div'); b.className = 'note-block';
+        const keyEl = document.getElementById(`key-${inst}-${num}`), rect = keyEl.getBoundingClientRect(), crect = laneContents[inst].getBoundingClientRect();
+        b.style.width = (rect.width - 2) + 'px'; b.style.left = (rect.left - crect.left) + 'px'; b.style.top = top + 'px'; b.style.height = height + 'px';
+        let txt = noteNames[num % 12], bg = getInstColor(inst, num);
+        if (inst === 'drums') { if (num === 36) { txt = "ドン"; bg = "#f44336"; } else if (num === 38) { txt = "タン"; bg = "#2196f3"; } else if (num === 42) { txt = "チッ"; bg = "#ffeb3b"; b.style.color = "#000"; } }
+        b.style.backgroundColor = bg; const l = document.createElement('span'); l.className = 'note-label'; l.innerText = txt; b.appendChild(l);
+        b.dataset.midi = num; b.dataset.inst = inst; const r = document.createElement('div'); r.className = 'resizer'; b.appendChild(r);
+        makeInteractive(b, r); return b;
     }
 
-    function makeInteractive(el, resizer) {
-        let isDragging = false, isResizing = false, hasMoved = false;
-        let startY, startH, startTop, startMouseX, startMouseY, selectedNotes = [], allOtherNotes = [];
-        
-        resizer.addEventListener('mousedown', (e) => {
-            saveHistory(); isResizing = true; startY = e.clientY; 
-            startH = parseInt(el.style.height); startTop = parseFloat(el.style.top);
-            // リサイズ開始時に他の全ての音符の状態を記録
-            allOtherNotes = Array.from(document.querySelectorAll('.note-block')).map(b => ({
-                el: b, initialTop: parseFloat(b.style.top)
-            }));
-            e.stopPropagation(); e.preventDefault();
+    function makeInteractive(el, res) {
+        let isD = false, isR = false, sy, sh, st, smx, smy, sn = [];
+        res.onmousedown = (e) => { saveHistory(); isR = true; sy = e.clientY; sh = parseInt(el.style.height); e.stopPropagation(); };
+        el.onmousedown = (e) => { if (isR) return; isD = true; smx = e.clientX; smy = e.clientY; if (!el.classList.contains('selected')) { if (!e.ctrlKey) document.querySelectorAll('.note-block.selected').forEach(b => b.classList.remove('selected')); el.classList.add('selected'); } sn = Array.from(document.querySelectorAll('.note-block.selected')).map(b => ({ el: b, t: parseFloat(b.style.top), l: parseFloat(b.style.left) })); e.stopPropagation(); };
+        window.addEventListener('mousemove', (e) => {
+            if (isR) el.style.height = Math.max(15, sh + (e.clientY - sy)) + 'px';
+            else if (isD) { const dy = e.clientY - smy, dx = e.clientX - smx; sn.forEach(i => { i.el.style.top = (i.t + dy) + 'px'; i.el.style.left = (i.l + dx) + 'px'; }); }
         });
-        
-        el.addEventListener('mousedown', (e) => {
-            if (isResizing) return;
-            isDragging = true; hasMoved = false; startMouseX = e.clientX; startMouseY = e.clientY;
-            if (!el.classList.contains('selected')) {
-                if (!e.ctrlKey && !e.shiftKey) document.querySelectorAll('.note-block.selected').forEach(b => b.classList.remove('selected'));
-                el.classList.add('selected');
-            }
-            selectedNotes = Array.from(document.querySelectorAll('.note-block.selected')).map(b => ({
-                el: b, startTop: parseFloat(b.style.top), startLeft: parseFloat(b.style.left)
-            }));
-            e.stopPropagation();
-        });
+        window.addEventListener('mouseup', () => { isD = isR = false; });
+    }
 
-        const onMouseMove = (e) => {
-            if (isResizing) { 
-                const newH = Math.max(15, startH + (e.clientY - startY));
-                const deltaH = newH - startH;
-                el.style.height = newH + 'px';
-                
-                // 後ろの音符を一斉にずらす
-                allOtherNotes.forEach(note => {
-                    if (note.el === el) return;
-                    if (note.initialTop >= startTop + startH - 1) {
-                        note.el.style.top = (note.initialTop + deltaH) + 'px';
-                    }
+    async function playMelody() {
+        await initAudio(); if (isPlaying) return; isPlaying = true;
+        const startPos = currentPlayheadY, blocks = Array.from(document.querySelectorAll('.note-block')).filter(b => (parseFloat(b.style.top) + parseFloat(b.style.height)) > startPos).sort((a,b) => parseFloat(a.style.top) - parseFloat(b.style.top));
+        if (blocks.length === 0) { isPlaying = false; return; }
+        const bt = audioCtx.currentTime + 0.1; updatePlayhead(bt, startPos, pps);
+        blocks.forEach(b => {
+            const m = parseInt(b.dataset.midi), i = b.dataset.inst, t = parseFloat(b.style.top), h = parseFloat(b.style.height);
+            const st = bt + Math.max(0, t - startPos) / pps, dur = h / pps;
+            const { nodes } = createOscillator(m, st, dur, i); activeNodes.push(...nodes);
+            setTimeout(() => { if(isPlaying) b.classList.add('playing'); }, (st - audioCtx.currentTime) * 1000);
+            setTimeout(() => { b.classList.remove('playing'); }, (st + dur - audioCtx.currentTime) * 1000);
+        });
+    }
+    function stopMelody() { isPlaying = false; activeNodes.forEach(n => { try { n.stop(); } catch(e){} }); activeNodes = []; document.querySelectorAll('.note-block').forEach(b => b.classList.remove('playing')); }
+
+    function generateProgression() {
+        const type = document.getElementById('progSelect').value, key = parseInt(document.getElementById('keySelect').value); saveHistory();
+        const progs = { canon: [0, 4, 5, 2, 3, 0, 3, 4], pop: [3, 4, 2, 5], komuro: [5, 3, 4, 0], simple: [0, 3, 4, 0] }, steps = [0, 2, 4, 5, 7, 9, 11], degs = progs[type], bl = pps * 2;
+        let st = currentPlayheadY, mb = st + pps * 16, s = document.querySelector('.section-block.selected');
+        if (s) { st = parseFloat(s.style.top); mb = st + parseFloat(s.style.height); }
+        let ct = st; while (ct < mb - 5) {
+            degs.forEach(d => {
+                if (ct + bl > mb + 5) return;
+                laneContents['bass'].appendChild(createNoteElement(key+steps[d]+36, ct, bl, 'bass'));
+                [0, 2, 4].forEach(idx => {
+                    const tidx = (d + idx) % 7, oct = Math.floor((d + idx) / 7);
+                    laneContents['guitar'].appendChild(createNoteElement(key+steps[tidx]+(oct*12)+52, ct, bl, 'guitar'));
+                    laneContents['piano'].appendChild(createNoteElement(key+steps[tidx]+(oct*12)+64, ct, bl, 'piano'));
                 });
-            } 
-            else if (isDragging) {
-                const dx = e.clientX - startMouseX, dy = e.clientY - startMouseY;
-                if (!hasMoved && (Math.abs(dx) > 5 || Math.abs(dy) > 5)) { saveHistory(); hasMoved = true; }
-                selectedNotes.forEach(item => {
-                    item.el.style.top = (item.startTop + dy) + 'px';
-                    item.el.style.left = (item.startLeft + dx) + 'px';
-                    updateLabel(item.el); 
-                });
-            }
-        };
-        const onMouseUp = () => { isDragging = false; isResizing = false; selectedNotes = []; allOtherNotes = []; };
-        document.addEventListener('mousemove', onMouseMove); document.addEventListener('mouseup', onMouseUp);
-    }
-
-    function shiftOctave(delta) {
-        saveHistory();
-        const selected = document.querySelectorAll('.note-block.selected');
-        if (selected.length === 0) return;
-        selected.forEach(el => {
-            let midi = parseInt(el.dataset.midi) + (delta * 12);
-            if (midi >= 36 && midi <= 83) {
-                el.dataset.midi = midi;
-                const inst = el.dataset.inst;
-                const keyEl = document.getElementById(`key-${inst}-${midi}`);
-                const contentRect = laneContents[inst].getBoundingClientRect();
-                if (keyEl) {
-                    const rect = keyEl.getBoundingClientRect();
-                    el.style.left = (rect.left - contentRect.left) + 'px';
-                    el.style.width = (rect.width - 2) + 'px';
-                    el.style.backgroundColor = getInstColor(inst, midi);
-                    const label = el.querySelector('.note-label');
-                    if (label) label.innerText = noteNames[midi % 12];
-                }
-            }
-        });
-    }
-
-    function generateChord() {
-        const selected = Array.from(document.querySelectorAll('.note-block.selected'));
-        if (selected.length === 0) { alert("和音にしたいバーを選択してください"); return; }
-        saveHistory();
-        selected.forEach(el => {
-            const baseMidi = parseInt(el.dataset.midi);
-            const top = parseFloat(el.style.top);
-            const height = parseFloat(el.style.height);
-            const inst = el.dataset.inst;
-            
-            [4, 7].forEach(offset => {
-                const newMidi = baseMidi + offset;
-                if (newMidi <= 83) {
-                    const newBlock = createNoteElement(newMidi, top, height, inst);
-                    if (newBlock) laneContents[inst].appendChild(newBlock);
-                }
+                ct += bl;
             });
-        });
+        }
+        syncPlayhead(ct); alert("✨ 進行を生成しました！");
     }
 
     function generateBass() {
-        const selected = Array.from(document.querySelectorAll('.note-block.selected'))
-            .sort((a, b) => parseFloat(a.style.top) - parseFloat(b.style.top));
-        if (selected.length === 0) { alert("ベースにしたいメロディを選択してください"); return; }
-        saveHistory();
-        
-        let minTop = Infinity, maxBottom = 0;
-        selected.forEach(el => {
-            const t = parseFloat(el.style.top);
-            const b = t + parseFloat(el.style.height);
-            if (t < minTop) minTop = t;
-            if (b > maxBottom) maxBottom = b;
-        });
-
-        // 1秒(pps)ごとに均一な長さで音を配置
-        for (let t = minTop; t < maxBottom; t += pps) {
-            const activeNote = selected.find(el => {
-                const top = parseFloat(el.style.top);
-                const bottom = top + parseFloat(el.style.height);
-                return t >= top && t < bottom;
-            }) || selected.find(el => parseFloat(el.style.top) >= t);
-
-            if (!activeNote) break;
-
-            const midi = parseInt(activeNote.dataset.midi);
-            let bassMidi = midi - 24;
-            while (bassMidi < 36) bassMidi += 12; 
-            while (bassMidi > 48) bassMidi -= 12;
-
-            const duration = pps; // 長さを一定に固定
-            const newBlock = createNoteElement(bassMidi, t, duration, 'bass');
-            if (newBlock) laneContents['bass'].appendChild(newBlock);
+        let sel = Array.from(document.querySelectorAll('.note-block.selected'));
+        if (sel.length === 0) sel = Array.from(laneContents[document.getElementById('currentInst').value].querySelectorAll('.note-block'));
+        if (sel.length === 0) return; saveHistory();
+        let min = Math.min(...sel.map(b => parseFloat(b.style.top))), max = Math.max(...sel.map(b => parseFloat(b.style.top) + parseFloat(b.style.height)));
+        for (let t = min; t < max; t += pps) {
+            const n = sel.find(b => t >= parseFloat(b.style.top) && t < parseFloat(b.style.top)+parseFloat(b.style.height)) || sel[0];
+            let m = parseInt(n.dataset.midi) - 24; while(m < 36) m+=12; while(m > 48) m-=12;
+            laneContents['bass'].appendChild(createNoteElement(m, t, pps, 'bass'));
         }
     }
 
     function generateGuitar() {
-        const selected = Array.from(document.querySelectorAll('.note-block.selected'))
-            .sort((a, b) => parseFloat(a.style.top) - parseFloat(b.style.top));
-        if (selected.length === 0) { alert("ギター伴奏にしたいメロディを選択してください"); return; }
-        saveHistory();
-        
-        let minTop = Infinity, maxBottom = 0;
-        selected.forEach(el => {
-            const t = parseFloat(el.style.top);
-            const b = t + parseFloat(el.style.height);
-            if (t < minTop) minTop = t;
-            if (b > maxBottom) maxBottom = b;
-        });
-
-        const chordSize = parseInt(document.getElementById('chordSize').value);
-        const chordIntervals = [0, 4, 7, 10, 14, 17, 21];
-
-        for (let t = minTop; t < maxBottom; t += pps) {
-            const activeNote = selected.find(el => {
-                const top = parseFloat(el.style.top);
-                const bottom = top + parseFloat(el.style.height);
-                return t >= top && t < bottom;
-            }) || selected.find(el => parseFloat(el.style.top) >= t);
-
-            if (!activeNote) break;
-
-            const midi = parseInt(activeNote.dataset.midi);
-            let rootMidi = midi - 12; 
-            while (rootMidi < 48) rootMidi += 12; 
-            while (rootMidi > 60) rootMidi -= 12;
-
-            const duration = pps; 
-            for (let i = 0; i < chordSize; i++) {
-                const b = createNoteElement(rootMidi + chordIntervals[i], t, duration, 'guitar');
-                if (b) laneContents['guitar'].appendChild(b);
-            }
+        let sel = Array.from(document.querySelectorAll('.note-block.selected'));
+        if (sel.length === 0) sel = Array.from(laneContents[document.getElementById('currentInst').value].querySelectorAll('.note-block'));
+        if (sel.length === 0) return; saveHistory();
+        let min = Math.min(...sel.map(b => parseFloat(b.style.top))), max = Math.max(...sel.map(b => parseFloat(b.style.top) + parseFloat(b.style.height)));
+        const size = parseInt(document.getElementById('chordSize').value), ints = [0, 4, 7, 10, 14, 17, 21];
+        for (let t = min; t < max; t += pps) {
+            const n = sel.find(b => t >= parseFloat(b.style.top) && t < parseFloat(b.style.top)+parseFloat(b.style.height)) || sel[0];
+            let r = parseInt(n.dataset.midi) - 12; while(r < 48) r+=12; while(r > 60) r-=12;
+            for(let i=0; i<size; i++) laneContents['guitar'].appendChild(createNoteElement(r+ints[i], t, pps, 'guitar'));
         }
-    }
-
-    function alignNoteEnds() {
-        const selected = Array.from(document.querySelectorAll('.note-block.selected'));
-        if (selected.length < 2) { alert("2つ以上のバーを選択してください"); return; }
-        saveHistory();
-        let maxB = 0;
-        selected.forEach(b => {
-            const bottom = parseFloat(b.style.top) + parseFloat(b.style.height);
-            if (bottom > maxB) maxB = bottom;
-        });
-        selected.forEach(b => {
-            const t = parseFloat(b.style.top);
-            b.style.height = Math.max(15, maxB - t) + 'px';
-        });
-    }
-
-    function alignNoteStarts() {
-        const selected = Array.from(document.querySelectorAll('.note-block.selected'));
-        if (selected.length < 2) return;
-        saveHistory();
-        let minT = Infinity;
-        selected.forEach(b => {
-            const top = parseFloat(b.style.top);
-            if (top < minT) minT = top;
-        });
-        selected.forEach(b => {
-            const bottom = parseFloat(b.style.top) + parseFloat(b.style.height);
-            b.style.top = minT + 'px';
-            b.style.height = Math.max(15, bottom - minT) + 'px';
-        });
-    }
-
-    function updateLabel(el) {
-        const inst = el.dataset.inst;
-        const keys = Array.from(laneContents[inst].parentElement.querySelectorAll('.key'));
-        const contentRect = laneContents[inst].getBoundingClientRect();
-        
-        let closest = keys.reduce((prev, curr) => {
-            const prevDist = Math.abs((prev.getBoundingClientRect().left - contentRect.left) - parseFloat(el.style.left));
-            const currDist = Math.abs((curr.getBoundingClientRect().left - contentRect.left) - parseFloat(el.style.left));
-            return currDist < prevDist ? curr : prev;
-        });
-        
-        const num = parseInt(closest.id.split('-').pop());
-        const label = el.querySelector('.note-label');
-        let labelText = noteNames[num % 12];
-        let bgColor = getInstColor(inst, num);
-
-        if (inst === 'drums') {
-            if (num === 36) { labelText = "ドン"; bgColor = "#f44336"; }
-            else if (num === 38) { labelText = "タン"; bgColor = "#2196f3"; }
-            else if (num === 42) { labelText = "チッ"; bgColor = "#ffeb3b"; el.style.color = "#000"; }
-            else { labelText = "🥁"; }
-        }
-
-        if (label) label.innerText = labelText;
-        el.style.backgroundColor = bgColor;
-        el.style.left = (closest.getBoundingClientRect().left - contentRect.left) + 'px';
-        el.style.width = (closest.getBoundingClientRect().width - 2) + 'px';
-        el.dataset.midi = num;
-    }
-
-    function mergeSelected() {
-        saveHistory();
-        const sel = Array.from(document.querySelectorAll('.note-block.selected')).sort((a,b)=>parseFloat(a.style.top)-parseFloat(b.style.top));
-        if (sel.length < 2) return;
-        let minT = parseFloat(sel[0].style.top), maxB = 0, midi = sel[0].dataset.midi, inst = sel[0].dataset.inst;
-        sel.forEach(b => { maxB = Math.max(maxB, parseFloat(b.style.top) + parseFloat(b.style.height)); b.remove(); });
-        laneContents[inst].appendChild(createNoteElement(midi, minT, (maxB - minT), inst));
-    }
-
-    function splitSelected() {
-        saveHistory();
-        document.querySelectorAll('.note-block.selected').forEach(b => {
-            const h = parseFloat(b.style.height), t = parseFloat(b.style.top), newH = h / 2, midi = b.dataset.midi, inst = b.dataset.inst;
-            if (h < 30) return;
-            b.remove();
-            laneContents[inst].appendChild(createNoteElement(midi, t, newH, inst));
-            laneContents[inst].appendChild(createNoteElement(midi, t + newH, newH, inst));
-        });
-    }
-
-    function deleteSelected() { saveHistory(); document.querySelectorAll('.note-block.selected').forEach(b => b.remove()); }
-
-    let clipboard = [];
-    function copySelected() {
-        const selected = Array.from(document.querySelectorAll('.note-block.selected'));
-        if (selected.length === 0) return;
-        clipboard = selected.map(b => ({
-            midi: b.dataset.midi, inst: b.dataset.inst, top: parseFloat(b.style.top),
-            left: b.style.left, height: b.style.height, color: b.style.backgroundColor, text: b.querySelector('.note-label').innerText
-        }));
-    }
-
-    function pasteSelected() {
-        if (clipboard.length === 0) return;
-        saveHistory();
-        document.querySelectorAll('.note-block.selected').forEach(b => b.classList.remove('selected'));
-        clipboard.forEach(data => {
-            const b = createNoteElement(parseInt(data.midi), data.top + 50, parseFloat(data.height), data.inst);
-            b.style.left = data.left; b.querySelector('.note-label').innerText = data.text;
-            b.classList.add('selected'); laneContents[data.inst].appendChild(b);
-        });
-    }
-
-    async function playMelody() {
-        await initAudio(); if (isPlaying) return;
-        const startPos = currentPlayheadY;
-        const allBlocks = Array.from(document.querySelectorAll('.note-block'))
-            .filter(b => (parseFloat(b.style.top) + parseFloat(b.style.height)) > startPos)
-            .sort((a, b) => parseFloat(a.style.top) - parseFloat(b.style.top));
-        if (allBlocks.length === 0) { syncPlayhead(0); return; }
-        isPlaying = true;
-        try {
-            const baseTime = audioCtx.currentTime + 0.1, baseTop = startPos;
-            let maxDuration = 0; updatePlayhead(baseTime, baseTop, pps);
-            for (const block of allBlocks) {
-                if (!isPlaying) break;
-                const midi = parseInt(block.dataset.midi), inst = block.dataset.inst || 'piano';
-                const top = parseFloat(block.style.top), height = parseFloat(block.style.height);
-                const startTime = baseTime + Math.max(0, top - baseTop) / pps;
-                let duration = height / pps; if (top < baseTop) duration -= (baseTop - top) / pps;
-                const endTime = startTime + duration; if ((endTime - baseTime) > maxDuration) maxDuration = endTime - baseTime;
-                const { nodes } = createOscillator(midi, startTime, duration, inst); activeNodes.push(...nodes);
-                const sDel = Math.max(0, (startTime - audioCtx.currentTime) * 1000), eDel = Math.max(0, (endTime - audioCtx.currentTime) * 1000);
-                setTimeout(() => { if(isPlaying) { block.classList.add('playing'); const key = document.getElementById(`key-${inst}-${midi}`); if(key) key.classList.add('active'); }}, sDel);
-                setTimeout(() => { block.classList.remove('playing'); const key = document.getElementById(`key-${inst}-${midi}`); if(key) key.classList.remove('active'); }, eDel);
-            }
-            setTimeout(() => { isPlaying = false; }, (maxDuration * 1000) + 200);
-        } catch (e) { console.error(e); isPlaying = false; }
-    }
-
-    function stopMelody() { isPlaying = false; activeNodes.forEach(n => { try { n.stop(); } catch(e){} }); activeNodes = []; document.querySelectorAll('.note-block').forEach(b => b.classList.remove('playing')); document.querySelectorAll('.key').forEach(k => k.classList.remove('active')); }
-    function autoCorrelate(buf, sampleRate) {
-        let SIZE = buf.length, rms = 0; for (let i=0; i<SIZE; i++) rms += buf[i]*buf[i];
-        if (Math.sqrt(rms/SIZE) < 0.02) return -1;
-        let c = new Float32Array(SIZE); for (let i=0; i<SIZE; i++) for (let j=0; j<SIZE-i; j++) c[i] = c[i] + buf[j]*buf[j+i];
-        let d=0; while (c[d]>c[d+1]) d++;
-        let maxval=-1, maxpos=-1; for (let i=d; i<SIZE; i++) if (c[i] > maxval) { maxval = c[i]; maxpos = i; }
-        return sampleRate/maxpos;
-    }
-
-    function generateProgression() {
-        const type = document.getElementById('progSelect').value;
-        const baseKey = parseInt(document.getElementById('keySelect').value);
-        saveHistory();
-        const progressions = {
-            canon: [0, 4, 5, 2, 3, 0, 3, 4], 
-            pop: [3, 4, 2, 5],              
-            komuro: [5, 3, 4, 0],           
-            simple: [0, 3, 4, 0]            
-        };
-        const scaleSteps = [0, 2, 4, 5, 7, 9, 11]; 
-        const chordDegrees = progressions[type];
-        const barLength = pps * 2; 
-        
-        let startTop = currentPlayheadY;
-        let maxBottom = (pps * 16); 
-
-        // 選択されたセクション（箱）があればその範囲を、なければ再生バーから8小節分
-        const selectedSection = document.querySelector('.section-block.selected');
-        if (selectedSection) {
-            startTop = parseFloat(selectedSection.style.top);
-            maxBottom = startTop + parseFloat(selectedSection.style.height);
-        } else {
-            // 箱がない場合は再生バーから8小節(16s)分作る
-            maxBottom = startTop + (pps * 16);
-        }
-        
-        let currentTop = startTop;
-        let loopCount = 0;
-
-        while (currentTop < maxBottom && loopCount < 100) {
-            chordDegrees.forEach(degreeIdx => {
-                if (currentTop + barLength > maxBottom + 5) return; // 範囲をはみ出さない
-                const bassMidi = baseKey + scaleSteps[degreeIdx] + 36;
-                const b = createNoteElement(bassMidi, currentTop, barLength, 'bass');
-                if (b && laneContents['bass']) laneContents['bass'].appendChild(b);
-                
-                const intervals = [0, 2, 4]; 
-                intervals.forEach(intIdx => {
-                    const targetIdx = (degreeIdx + intIdx) % 7;
-                    const octaveShift = Math.floor((degreeIdx + intIdx) / 7);
-                    const midi = baseKey + scaleSteps[targetIdx] + (octaveShift * 12) + 52;
-                    const g = createNoteElement(midi, currentTop, barLength, 'guitar');
-                    if (g && laneContents['guitar']) laneContents['guitar'].appendChild(g);
-                });
-                currentTop += barLength;
-            });
-            loopCount++;
-        }
-        
-        syncPlayhead(currentTop);
-        Object.values(laneContents).forEach(c => c.scrollTop = startTop - 50);
-        alert(selectedSection ? "✨ 選択範囲に進行を生成しました！" : "✨ 進行を生成しました！");
     }
 
     function generateDrum() {
-        const type = document.getElementById('drumSelect').value;
-        saveHistory();
-        
-        let startTop = currentPlayheadY;
-        let maxBottom = (pps * 16);
-
-        // 選択されたセクション（箱）があればその範囲を優先
-        const selectedSection = document.querySelector('.section-block.selected');
-        if (selectedSection) {
-            startTop = parseFloat(selectedSection.style.top);
-            maxBottom = startTop + parseFloat(selectedSection.style.height);
-        } else {
-            const allBlocks = Array.from(document.querySelectorAll('.note-block'));
-            if (allBlocks.length > 0) maxBottom = Math.max(...allBlocks.map(b => parseFloat(b.style.top) + parseFloat(b.style.height)));
-        }
-        
-        const barLen = pps * 4;
-        const beatLen = pps;
-        const eighth = pps / 2;
-        const sixteenth = pps / 4;
-        
-        const addD = (midi, top) => {
-            const b = createNoteElement(midi, top, 20, 'drums');
-            if (b) laneContents['drums'].appendChild(b);
-        };
-
-        let currentTop = startTop;
-        let loopCount = 0;
-
-        while (currentTop < maxBottom && loopCount < 50) {
-            if (currentTop + barLen > maxBottom + 5) break; // 範囲をはみ出さない
-            const base = currentTop;
-            if (type === 'four') {
-                for (let j = 0; j < 4; j++) addD(36, base + j * beatLen);
-                addD(38, base + beatLen); addD(38, base + beatLen * 3);
-            } else if (type === 'four_beat') {
-                addD(36, base); addD(36, base + beatLen * 2);
-                addD(38, base + beatLen); addD(38, base + beatLen * 3);
-            } else if (type === 'eight_beat') {
-                addD(36, base); addD(36, base + beatLen * 2);
-                addD(38, base + beatLen); addD(38, base + beatLen * 3);
-                for (let j = 0; j < 8; j++) addD(42, base + j * eighth);
-            } else if (type === 'sixteen_beat') {
-                addD(36, base); addD(36, base + beatLen * 2.5);
-                addD(38, base + beatLen); addD(38, base + beatLen * 3);
-                for (let j = 0; j < 16; j++) addD(42, base + j * sixteenth);
+        const type = document.getElementById('drumSelect').value; saveHistory();
+        let st = currentPlayheadY, mb = st + pps * 16, s = document.querySelector('.section-block.selected');
+        if (s) { st = parseFloat(s.style.top); mb = st + parseFloat(s.style.height); }
+        const bl = pps * 4, beat = pps, addD = (m, t) => laneContents['drums'].appendChild(createNoteElement(m, t, 20, 'drums'));
+        let ct = st; while (ct < mb - 5) {
+            for (let j=0; j<4; j++) {
+                if (type==='four'||type==='four_beat') { addD(36, ct + j*beat); if(j%2===1) addD(38, ct + j*beat); }
+                else if (type==='eight_beat') { addD(36, ct + (j%2===0?0:beat*0.5)); addD(38, ct+beat); addD(42, ct+j*beat); addD(42, ct+j*beat+beat*0.5); }
             }
-            currentTop += barLen;
-            loopCount++;
+            ct += bl;
         }
-        syncPlayhead(currentTop);
-        Object.values(laneContents).forEach(c => c.scrollTop = startTop - 50);
-        alert(selectedSection ? "🥁 選択範囲にドラムを生成しました！" : "🥁 ドラムを生成しました！");
+        syncPlayhead(ct); alert("🥁 ドラム生成完了");
     }
+
+    function undo() { if (historyStack.length > 0) { redoStack.push(JSON.stringify(Array.from(document.querySelectorAll('.note-block')).map(b => ({ midi: b.dataset.midi, inst: b.dataset.inst, top: b.style.top, left: b.style.left, height: b.style.height, color: b.style.backgroundColor, text: b.querySelector('.note-label').innerText })))); applyState(JSON.parse(historyStack.pop())); } }
+    function deleteSelected() { saveHistory(); document.querySelectorAll('.note-block.selected').forEach(b => b.remove()); }
+    function copySelected() { const s = Array.from(document.querySelectorAll('.note-block.selected')); if(s.length) clipboard = s.map(b => ({ midi: b.dataset.midi, inst: b.dataset.inst, top: parseFloat(b.style.top), left: b.style.left, height: b.style.height, text: b.querySelector('.note-label').innerText })); }
+    function pasteSelected() { if(!clipboard.length) return; saveHistory(); clipboard.forEach(d => { const b = createNoteElement(parseInt(d.midi), d.top + 50, parseFloat(d.height), d.inst); b.style.left = d.left; b.querySelector('.note-label').innerText = d.text; laneContents[d.inst].appendChild(b); }); }
+    function shiftOctave(d) { saveHistory(); document.querySelectorAll('.note-block.selected').forEach(el => { let m = parseInt(el.dataset.midi) + d*12; if(m>=36 && m<=83) { el.dataset.midi = m; updateLabel(el); } }); }
+    function updateLabel(el) { const i = el.dataset.inst, m = parseInt(el.dataset.midi), k = document.getElementById(`key-${i}-${m}`), rect = k.getBoundingClientRect(), crect = laneContents[i].getBoundingClientRect(); el.style.left = (rect.left - crect.left) + 'px'; el.style.width = (rect.width-2)+'px'; el.style.backgroundColor = getInstColor(i, m); el.querySelector('.note-label').innerText = noteNames[m%12]; }
+    function alignNoteEnds() { saveHistory(); const s = Array.from(document.querySelectorAll('.note-block.selected')); if(s.length<2) return; const max = Math.max(...s.map(b => parseFloat(b.style.top)+parseFloat(b.style.height))); s.forEach(b => b.style.height = (max - parseFloat(b.style.top)) + 'px'); }
+    function mergeSelected() { saveHistory(); const s = Array.from(document.querySelectorAll('.note-block.selected')).sort((a,b)=>parseFloat(a.style.top)-parseFloat(b.style.top)); if(s.length<2) return; const t = parseFloat(s[0].style.top), b = Math.max(...s.map(x=>parseFloat(x.style.top)+parseFloat(x.style.height))), m = s[0].dataset.midi, i = s[0].dataset.inst; s.forEach(x=>x.remove()); laneContents[i].appendChild(createNoteElement(m, t, b-t, i)); }
+    function splitSelected() { saveHistory(); document.querySelectorAll('.note-block.selected').forEach(b => { const h = parseFloat(b.style.height)/2, t = parseFloat(b.style.top), m = b.dataset.midi, i = b.dataset.inst; if(h<15) return; b.remove(); laneContents[i].appendChild(createNoteElement(m, t, h, i)); laneContents[i].appendChild(createNoteElement(m, t+h, h, i)); }); }
+    
+    let clipboard = [];
+    function saveToFile() { const data = JSON.stringify(Array.from(document.querySelectorAll('.note-block')).map(b => ({ midi: b.dataset.midi, inst: b.dataset.inst, top: b.style.top, left: b.style.left, height: b.style.height, color: b.style.backgroundColor, text: b.querySelector('.note-label').innerText }))); const blob = new Blob([data], {type: 'application/json'}); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `project.json`; a.click(); }
+    function loadFromFile() { document.getElementById('fileInput').click(); }
+    function handleFileSelect(e) { const f = e.target.files[0]; if(!f) return; const r = new FileReader(); r.onload = (ex) => applyState(JSON.parse(ex.target.result)); r.readAsText(f); }
+    function newProject() { if(confirm("新規？")) { Object.values(laneContents).forEach(c => c.innerHTML=''); syncPlayhead(0); } }
+
+    updateSpeed(80);
 </script>
 </body>
 </html>
