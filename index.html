@@ -339,6 +339,8 @@
         trackLanes[instId] = lane; laneContents[instId] = content;
     });
 
+    window.addEventListener('mouseup', stopKeyNote);
+
     function detectKeyFromMelody() {
         const blocks = Array.from(document.querySelectorAll('.note-block'));
         if (blocks.length === 0) return;
@@ -411,12 +413,13 @@
 
     function getInstColor(inst, midi) { const colors = instrumentConfigs[inst].colors; return colors[midi % colors.length]; }
 
-    function updatePlayhead(startTime, baseTop, ppsV) {
+    function updatePlayhead(startTime, baseTop, ppsV, maxPos) {
         if (!isPlaying) return;
         const curT = baseTop + (audioCtx.currentTime - startTime) * ppsV;
+        if (curT >= maxPos) { stopMelody(); syncPlayhead(maxPos); return; }
         syncPlayhead(curT);
         Object.values(laneContents).forEach(c => { if (curT > c.scrollTop + c.clientHeight - 100) c.scrollTop = curT - c.clientHeight / 2; });
-        requestAnimationFrame(() => updatePlayhead(startTime, baseTop, ppsV));
+        requestAnimationFrame(() => updatePlayhead(startTime, baseTop, ppsV, maxPos));
     }
 
     function createOscillator(midi, startTime, duration = -1, inst = null) {
@@ -477,8 +480,8 @@
     }
     function stopKeyNote() {
         if (pressedKey === -1) return; const inst = document.getElementById('currentInst').value;
-        if (keyGain) { keyGain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1); setTimeout(() => { keyNodes.forEach(n => { try { n.stop(); } catch(e){} }); }, 200); }
-        const keyEl = document.getElementById(`key-${inst}-${pressedKey}`); if (keyEl) keyEl.classList.remove('active'); pressedKey = -1; currentBlock = null;
+        if (keyGain) { keyGain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1); setTimeout(() => { if(keyNodes) keyNodes.forEach(n => { try { n.stop(); } catch(e){} }); }, 200); }
+        const keyEl = document.getElementById(`key-${inst}-${pressedKey}`); if (keyEl) keyEl.classList.remove('active'); pressedKey = -1; currentBlock = null; lastNoteNumber = -1;
     }
 
     function saveHistory() { historyStack.push(JSON.stringify(Array.from(document.querySelectorAll('.note-block')).map(b => ({ midi: b.dataset.midi, inst: b.dataset.inst, top: b.style.top, left: b.style.left, height: b.style.height, color: b.style.backgroundColor, text: b.querySelector('.note-label').innerText })))); if (historyStack.length > 50) historyStack.shift(); redoStack = []; }
@@ -500,8 +503,13 @@
 
     function update() {
         if (!isRunning && pressedKey === -1) return;
-        let ct = isRunning ? recordStartTop + (audioCtx.currentTime - recordStartTime) * pps : nextTop + pps/60;
+        const frameStep = pps / 60;
+        let ct = isRunning ? recordStartTop + (audioCtx.currentTime - recordStartTime) * pps : nextTop + frameStep;
         if (pressedKey !== -1) nextTop = ct; syncPlayhead(ct);
+
+        // 入力・録音中の自動スクロール
+        Object.values(laneContents).forEach(c => { if (ct > c.scrollTop + c.clientHeight - 100) c.scrollTop = ct - c.clientHeight / 2; });
+
         let noteNum = pressedKey;
         if (isRunning && noteNum === -1) {
             const buf = new Float32Array(analyser.fftSize); analyser.getFloatTimeDomainData(buf);
@@ -509,7 +517,15 @@
             if (pitch !== -1) noteNum = Math.round(12 * Math.log2(pitch / 440) + 69);
         }
         if (noteNum !== -1) {
-            if (noteNum === lastNoteNumber && currentBlock) { currentBlock.style.height = (ct - parseFloat(currentBlock.style.top)) + 'px'; }
+            if (noteNum === lastNoteNumber && currentBlock) {
+                const oldH = parseFloat(currentBlock.style.height);
+                const actualH = Math.max(4, ct - parseFloat(currentBlock.style.top));
+                const deltaH = actualH - oldH;
+                currentBlock.style.height = actualH + 'px';
+                // 後ろの音符を押し出す
+                const bt = parseFloat(currentBlock.style.top);
+                document.querySelectorAll('.note-block').forEach(b => { if (b !== currentBlock && parseFloat(b.style.top) >= bt + oldH - 1) b.style.top = (parseFloat(b.style.top) + deltaH) + 'px'; });
+            }
             else if (noteNum >= 36 && noteNum <= 83) { const inst = document.getElementById('currentInst').value; const b = createNoteElement(noteNum, ct, 4, inst); laneContents[inst].appendChild(b); currentBlock = b; lastNoteNumber = noteNum; }
         } else { lastNoteNumber = -1; currentBlock = null; }
         requestAnimationFrame(update);
@@ -534,21 +550,24 @@
     }
 
     function makeInteractive(el, res) {
-        let isD = false, isR = false, sy, sh, st, smx, smy, sn = [];
-        res.onmousedown = (e) => { saveHistory(); isR = true; sy = e.clientY; sh = parseInt(el.style.height); e.stopPropagation(); };
+        let isD = false, isR = false, sy, sh, st, smx, smy, sn = [], allOther = [];
+        res.onmousedown = (e) => { saveHistory(); isR = true; sy = e.clientY; sh = parseInt(el.style.height); st = parseFloat(el.style.top); allOther = Array.from(document.querySelectorAll('.note-block')).map(b => ({ el: b, t: parseFloat(b.style.top) })); e.stopPropagation(); };
         el.onmousedown = (e) => { if (isR) return; isD = true; smx = e.clientX; smy = e.clientY; if (!el.classList.contains('selected')) { if (!e.ctrlKey) document.querySelectorAll('.note-block.selected').forEach(b => b.classList.remove('selected')); el.classList.add('selected'); } sn = Array.from(document.querySelectorAll('.note-block.selected')).map(b => ({ el: b, t: parseFloat(b.style.top), l: parseFloat(b.style.left) })); e.stopPropagation(); };
         window.addEventListener('mousemove', (e) => {
-            if (isR) el.style.height = Math.max(15, sh + (e.clientY - sy)) + 'px';
-            else if (isD) { const dy = e.clientY - smy, dx = e.clientX - smx; sn.forEach(i => { i.el.style.top = (i.t + dy) + 'px'; i.el.style.left = (i.l + dx) + 'px'; }); }
+            if (isR) { const nh = Math.max(15, sh + (e.clientY - sy)), dh = nh - sh; el.style.height = nh + 'px'; allOther.forEach(n => { if (n.el !== el && n.t >= st + sh - 1) n.el.style.top = (n.t + dh) + 'px'; }); }
+            else if (isD) { const dy = e.clientY - smy, dx = e.clientX - smx; sn.forEach(i => { i.el.style.top = (i.t + dy) + 'px'; i.el.style.left = (i.l + dx) + 'px'; updateLabel(i.el); }); }
         });
         window.addEventListener('mouseup', () => { isD = isR = false; });
     }
 
     async function playMelody() {
-        await initAudio(); if (isPlaying) return; isPlaying = true;
-        const startPos = currentPlayheadY, blocks = Array.from(document.querySelectorAll('.note-block')).filter(b => (parseFloat(b.style.top) + parseFloat(b.style.height)) > startPos).sort((a,b) => parseFloat(a.style.top) - parseFloat(b.style.top));
-        if (blocks.length === 0) { isPlaying = false; return; }
-        const bt = audioCtx.currentTime + 0.1; updatePlayhead(bt, startPos, pps);
+        await initAudio(); if (isPlaying) return;
+        const startPos = currentPlayheadY, allNotes = Array.from(document.querySelectorAll('.note-block'));
+        const blocks = allNotes.filter(b => (parseFloat(b.style.top) + parseFloat(b.style.height)) > startPos).sort((a,b) => parseFloat(a.style.top) - parseFloat(b.style.top));
+        if (blocks.length === 0) return;
+        isPlaying = true;
+        const maxPos = Math.max(...allNotes.map(b => parseFloat(b.style.top) + parseFloat(b.style.height)));
+        const bt = audioCtx.currentTime + 0.1; updatePlayhead(bt, startPos, pps, maxPos);
         blocks.forEach(b => {
             const m = parseInt(b.dataset.midi), i = b.dataset.inst, t = parseFloat(b.style.top), h = parseFloat(b.style.height);
             const st = bt + Math.max(0, t - startPos) / pps, dur = h / pps;
@@ -580,8 +599,9 @@
     }
 
     function generateBass() {
+        const inst = document.getElementById('currentInst').value;
         let sel = Array.from(document.querySelectorAll('.note-block.selected'));
-        if (sel.length === 0) sel = Array.from(laneContents[document.getElementById('currentInst').value].querySelectorAll('.note-block'));
+        if (sel.length === 0) sel = Array.from(laneContents[inst].querySelectorAll('.note-block'));
         if (sel.length === 0) return; saveHistory();
         let min = Math.min(...sel.map(b => parseFloat(b.style.top))), max = Math.max(...sel.map(b => parseFloat(b.style.top) + parseFloat(b.style.height)));
         for (let t = min; t < max; t += pps) {
@@ -592,8 +612,9 @@
     }
 
     function generateGuitar() {
+        const inst = document.getElementById('currentInst').value;
         let sel = Array.from(document.querySelectorAll('.note-block.selected'));
-        if (sel.length === 0) sel = Array.from(laneContents[document.getElementById('currentInst').value].querySelectorAll('.note-block'));
+        if (sel.length === 0) sel = Array.from(laneContents[inst].querySelectorAll('.note-block'));
         if (sel.length === 0) return; saveHistory();
         let min = Math.min(...sel.map(b => parseFloat(b.style.top))), max = Math.max(...sel.map(b => parseFloat(b.style.top) + parseFloat(b.style.height)));
         const size = parseInt(document.getElementById('chordSize').value), ints = [0, 4, 7, 10, 14, 17, 21];
@@ -619,7 +640,6 @@
         syncPlayhead(ct); alert("🥁 ドラム生成完了");
     }
 
-    function undo() { if (historyStack.length > 0) { redoStack.push(JSON.stringify(Array.from(document.querySelectorAll('.note-block')).map(b => ({ midi: b.dataset.midi, inst: b.dataset.inst, top: b.style.top, left: b.style.left, height: b.style.height, color: b.style.backgroundColor, text: b.querySelector('.note-label').innerText })))); applyState(JSON.parse(historyStack.pop())); } }
     function deleteSelected() { saveHistory(); document.querySelectorAll('.note-block.selected').forEach(b => b.remove()); }
     function copySelected() { const s = Array.from(document.querySelectorAll('.note-block.selected')); if(s.length) clipboard = s.map(b => ({ midi: b.dataset.midi, inst: b.dataset.inst, top: parseFloat(b.style.top), left: b.style.left, height: b.style.height, text: b.querySelector('.note-label').innerText })); }
     function pasteSelected() { if(!clipboard.length) return; saveHistory(); clipboard.forEach(d => { const b = createNoteElement(parseInt(d.midi), d.top + 50, parseFloat(d.height), d.inst); b.style.left = d.left; b.querySelector('.note-label').innerText = d.text; laneContents[d.inst].appendChild(b); }); }
@@ -633,7 +653,7 @@
     function saveToFile() { const data = JSON.stringify(Array.from(document.querySelectorAll('.note-block')).map(b => ({ midi: b.dataset.midi, inst: b.dataset.inst, top: b.style.top, left: b.style.left, height: b.style.height, color: b.style.backgroundColor, text: b.querySelector('.note-label').innerText }))); const blob = new Blob([data], {type: 'application/json'}); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `project.json`; a.click(); }
     function loadFromFile() { document.getElementById('fileInput').click(); }
     function handleFileSelect(e) { const f = e.target.files[0]; if(!f) return; const r = new FileReader(); r.onload = (ex) => applyState(JSON.parse(ex.target.result)); r.readAsText(f); }
-    function newProject() { if(confirm("新規？")) { Object.values(laneContents).forEach(c => c.innerHTML=''); syncPlayhead(0); } }
+    function newProject() { if(confirm("新規？")) { Object.values(laneContents).forEach(c => Array.from(c.querySelectorAll('.note-block')).forEach(b => b.remove())); syncPlayhead(0); } }
 
     updateSpeed(80);
 </script>
