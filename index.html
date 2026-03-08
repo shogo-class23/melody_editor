@@ -7,7 +7,7 @@
         body { font-family: sans-serif; text-align: center; background: #1a1a1a; color: white; margin: 0; overflow: hidden; }
         .container { display: flex; flex-direction: column; height: 100vh; }
         
-        #ui { padding: 10px; background: #222; border-bottom: 1px solid #444; z-index: 1001; }
+        #ui { padding: 10px; background: #222; border-bottom: 1px solid #444; z-index: 10000; position: relative; }
         .btn { padding: 8px 12px; font-size: 12px; cursor: pointer; border: none; border-radius: 10px; font-weight: bold; margin: 2px; color: white; }
 
         /* トラック全体のコンテナ */
@@ -74,15 +74,23 @@
             width: 100px; background: #222; border-right: 2px solid #444; 
             display: flex; flex-direction: column; flex-shrink: 0; z-index: 1000;
         }
-        #section-header { height: 80px; background: #333; border-bottom: 2px solid #444; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold; }
+        /* z-indexを箱(10)より高くし、高さを右側(約65px)に合わせる */
+        #section-header { 
+            height: 65px; background: #333; border-bottom: 2px solid #444; 
+            display: flex; align-items: center; justify-content: center; 
+            font-size: 12px; font-weight: bold; position: relative; z-index: 20; 
+        }
         #section-container { position: relative; flex-grow: 1; background: #1a1a1a; overflow: hidden; }
         
         .section-block { 
             position: absolute; width: 100%; background: #555; color: white; border: 1px solid #888;
-            cursor: grab; text-align: center; box-sizing: border-box; display: flex; align-items: center; justify-content: center;
+            cursor: pointer; text-align: center; box-sizing: border-box; display: flex; align-items: center; justify-content: center;
             font-weight: bold; font-size: 12px; z-index: 10;
         }
+        .section-block.selected { border: 2px solid #ffeb3b; background: #444; box-shadow: inset 0 0 10px rgba(255,235,59,0.3); }
         .section-resizer { position: absolute; bottom: 0; width: 100%; height: 10px; cursor: ns-resize; background: rgba(255,255,255,0.2); }
+        
+        .section-block span { pointer-events: none; user-select: none; }
         
         /* 全レーンを貫通する白い線 */
         .section-line {
@@ -176,7 +184,9 @@
     <div id="editor-layout">
         <div id="section-sidebar">
             <div id="section-header">構成</div>
-            <div id="section-container" title="ダブルクリックで追加"></div>
+            <div id="section-container" style="position: relative; flex-grow: 1; overflow: hidden; background: #1a1a1a;">
+                <div id="section-inner" style="position: absolute; top: 0; left: 0; width: 100%;"></div>
+            </div>
         </div>
         <div id="tracks-wrapper">
             <!-- JSで各楽器のレーンを生成 -->
@@ -338,7 +348,8 @@
         content.onscroll = () => {
             const st = content.scrollTop;
             Object.values(laneContents).forEach(c => { if(c !== content) c.scrollTop = st; });
-            document.getElementById('section-container').style.marginTop = `-${st}px`;
+            // 箱が入っているインナーエリアだけを上にずらす
+            document.getElementById('section-inner').style.transform = `translateY(-${st}px)`;
         };
         
         wrapper.appendChild(lane);
@@ -368,12 +379,17 @@
 
     // セクション機能の実装
     function addSection(top, name = "Aメロ", height = 300) {
-        const container = document.getElementById('section-container');
+        const inner = document.getElementById('section-inner');
         const block = document.createElement('div');
         block.className = 'section-block';
         block.style.top = top + 'px';
         block.style.height = height + 'px';
-        block.innerText = name;
+        
+        // 名前表示用ラベルを追加
+        const label = document.createElement('span');
+        label.innerText = name;
+        label.style.pointerEvents = 'none'; // 文字が邪魔しないように
+        block.appendChild(label);
 
         const resizer = document.createElement('div');
         resizer.className = 'section-resizer';
@@ -400,17 +416,80 @@
             e.stopPropagation();
         };
         window.addEventListener('mousemove', (e) => {
-            if (isDrag) { block.style.top = (startTop + (e.clientY - startY)) + 'px'; updateUI(); }
-            else if (isResize) { block.style.height = Math.max(50, startH + (e.clientY - startY)) + 'px'; updateUI(); }
+            if (isDrag) { 
+                let newTop = startTop + (e.clientY - startY);
+                
+                // 隣接する箱との衝突判定
+                let minBound = 0;
+                let maxBound = Infinity;
+                const allBlocks = Array.from(document.querySelectorAll('.section-block'));
+                allBlocks.forEach(other => {
+                    if (other === block) return;
+                    const otherTop = parseFloat(other.style.top);
+                    const otherBottom = otherTop + parseFloat(other.style.height);
+                    
+                    // 自分の上にある箱の底辺を探す
+                    if (otherBottom <= startTop && otherBottom > minBound) minBound = otherBottom;
+                    // 自分の下にある箱の上辺を探す
+                    if (otherTop >= (startTop + startH) && otherTop < maxBound) maxBound = otherTop;
+                });
+
+                // 上下の範囲内に収める
+                let fixedTop = Math.max(minBound, newTop);
+                if (maxBound !== Infinity) {
+                    fixedTop = Math.min(fixedTop, maxBound - startH);
+                }
+                
+                block.style.top = fixedTop + 'px'; 
+                updateUI(); 
+            }
+            else if (isResize) { 
+                let newHeight = startH + (e.clientY - startY);
+                
+                // 下にある箱との衝突判定
+                let maxH = Infinity;
+                const allBlocks = Array.from(document.querySelectorAll('.section-block'));
+                allBlocks.forEach(other => {
+                    if (other === block) return;
+                    const otherTop = parseFloat(other.style.top);
+                    if (otherTop >= (startTop + startH) && otherTop < (startTop + maxH)) {
+                        maxH = otherTop - startTop;
+                    }
+                });
+
+                let fixedHeight = Math.max(30, newHeight);
+                if (maxH !== Infinity) {
+                    fixedHeight = Math.min(fixedHeight, maxH);
+                }
+                
+                block.style.height = fixedHeight + 'px'; 
+                updateUI(); 
+            }
         });
         window.addEventListener('mouseup', () => { isDrag = isResize = false; });
-        block.onclick = () => { if(!isDrag && !isResize) { const n = prompt("名前:", block.innerText); if(n) block.innerText = n; block.appendChild(resizer); } };
+        
+        block.onclick = (e) => {
+            if (isDrag || isResize) return;
+            // 選択処理
+            document.querySelectorAll('.section-block.selected').forEach(b => b.classList.remove('selected'));
+            block.classList.add('selected');
+            // 再生位置をこのセクションの開始位置へ
+            syncPlayhead(parseFloat(block.style.top));
+        };
+
+        block.ondblclick = (e) => {
+            e.stopPropagation();
+            const n = prompt("セクション名:", label.innerText);
+            if (n) label.innerText = n;
+        };
+
         block.oncontextmenu = (e) => { e.preventDefault(); if(confirm("削除？")) { block.remove(); dividers.forEach(d => { d.top.remove(); d.bottom.remove(); }); } };
-        container.appendChild(block);
+        inner.appendChild(block);
     }
 
     document.getElementById('section-container').ondblclick = (e) => {
-        const rect = e.currentTarget.getBoundingClientRect();
+        if (e.target !== document.getElementById('section-container') && e.target !== document.getElementById('section-inner')) return;
+        const rect = document.getElementById('section-container').getBoundingClientRect();
         const top = e.clientY - rect.top + Object.values(laneContents)[0].scrollTop;
         addSection(top);
     };
@@ -1168,21 +1247,25 @@
         const chordDegrees = progressions[type];
         const barLength = pps * 2; 
         
-        // 曲の終わりを見つける
-        const allBlocks = Array.from(document.querySelectorAll('.note-block'));
-        let maxBottom = allBlocks.length > 0 ? Math.max(...allBlocks.map(b => parseFloat(b.style.top) + parseFloat(b.style.height))) : (pps * 16);
-        
         let startTop = parseFloat(playhead.style.top) || 0;
-        const selected = document.querySelectorAll('.note-block.selected');
-        if (selected.length > 0) startTop = Math.min(...Array.from(selected).map(b => parseFloat(b.style.top)));
+        let maxBottom = (pps * 16); 
+
+        // 選択されたセクション（箱）があればその範囲を、なければ既存の音符の最後まで
+        const selectedSection = document.querySelector('.section-block.selected');
+        if (selectedSection) {
+            startTop = parseFloat(selectedSection.style.top);
+            maxBottom = startTop + parseFloat(selectedSection.style.height);
+        } else {
+            const allBlocks = Array.from(document.querySelectorAll('.note-block'));
+            if (allBlocks.length > 0) maxBottom = Math.max(...allBlocks.map(b => parseFloat(b.style.top) + parseFloat(b.style.height)));
+        }
         
         let currentTop = startTop;
         let loopCount = 0;
 
-        // 曲の終わりまで繰り返す
         while (currentTop < maxBottom && loopCount < 100) {
             chordDegrees.forEach(degreeIdx => {
-                if (currentTop >= maxBottom) return;
+                if (currentTop + barLength > maxBottom + 5) return; // 範囲をはみ出さない
                 const bassMidi = baseKey + scaleSteps[degreeIdx] + 36;
                 const b = createNoteElement(bassMidi, currentTop, barLength, 'bass');
                 if (b && laneContents['bass']) laneContents['bass'].appendChild(b);
@@ -1202,19 +1285,25 @@
         
         syncPlayhead(currentTop);
         Object.values(laneContents).forEach(c => c.scrollTop = startTop - 50);
-        alert("✨ 進行を曲の終わりまで生成しました！");
+        alert(selectedSection ? "✨ 選択範囲に進行を生成しました！" : "✨ 進行を生成しました！");
     }
 
     function generateDrum() {
         const type = document.getElementById('drumSelect').value;
         saveHistory();
         
-        const allBlocks = Array.from(document.querySelectorAll('.note-block'));
-        let maxBottom = allBlocks.length > 0 ? Math.max(...allBlocks.map(b => parseFloat(b.style.top) + parseFloat(b.style.height))) : (pps * 16);
-
         let startTop = parseFloat(playhead.style.top) || 0;
-        const selected = document.querySelectorAll('.note-block.selected');
-        if (selected.length > 0) startTop = Math.min(...Array.from(selected).map(b => parseFloat(b.style.top)));
+        let maxBottom = (pps * 16);
+
+        // 選択されたセクション（箱）があればその範囲を優先
+        const selectedSection = document.querySelector('.section-block.selected');
+        if (selectedSection) {
+            startTop = parseFloat(selectedSection.style.top);
+            maxBottom = startTop + parseFloat(selectedSection.style.height);
+        } else {
+            const allBlocks = Array.from(document.querySelectorAll('.note-block'));
+            if (allBlocks.length > 0) maxBottom = Math.max(...allBlocks.map(b => parseFloat(b.style.top) + parseFloat(b.style.height)));
+        }
         
         const barLen = pps * 4;
         const beatLen = pps;
@@ -1230,6 +1319,7 @@
         let loopCount = 0;
 
         while (currentTop < maxBottom && loopCount < 50) {
+            if (currentTop + barLen > maxBottom + 5) break; // 範囲をはみ出さない
             const base = currentTop;
             if (type === 'four') {
                 for (let j = 0; j < 4; j++) addD(36, base + j * beatLen);
@@ -1251,7 +1341,7 @@
         }
         syncPlayhead(currentTop);
         Object.values(laneContents).forEach(c => c.scrollTop = startTop - 50);
-        alert("🥁 ドラムパターンを最後まで生成しました！");
+        alert(selectedSection ? "🥁 選択範囲にドラムを生成しました！" : "🥁 ドラムを生成しました！");
     }
 </script>
 </body>
