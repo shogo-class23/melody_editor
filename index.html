@@ -1250,14 +1250,14 @@
         let startTop = parseFloat(playhead.style.top) || 0;
         let maxBottom = (pps * 16); 
 
-        // 選択されたセクション（箱）があればその範囲を、なければ既存の音符の最後まで
+        // 選択されたセクション（箱）があればその範囲を、なければ再生バーから8小節分
         const selectedSection = document.querySelector('.section-block.selected');
         if (selectedSection) {
             startTop = parseFloat(selectedSection.style.top);
             maxBottom = startTop + parseFloat(selectedSection.style.height);
         } else {
-            const allBlocks = Array.from(document.querySelectorAll('.note-block'));
-            if (allBlocks.length > 0) maxBottom = Math.max(...allBlocks.map(b => parseFloat(b.style.top) + parseFloat(b.style.height)));
+            // 箱がない場合は再生バーから8小節(16s)分作る
+            maxBottom = startTop + (pps * 16);
         }
         
         let currentTop = startTop;
