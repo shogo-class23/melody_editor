@@ -53,9 +53,9 @@
             pointer-events: none; z-index: 3000;
         }
         
-        #playhead {
-            position: absolute; left: 0; width: 100%; height: 2px; background: red;
-            box-shadow: 0 0 5px red; z-index: 2000; pointer-events: none; display: block;
+        .playhead {
+            position: absolute; left: 0; width: 100%; height: 3px; background: red;
+            box-shadow: 0 0 8px red; z-index: 6000; pointer-events: none; display: block;
             top: 0;
         }
 
@@ -224,8 +224,7 @@
     const wrapper = document.getElementById('tracks-wrapper');
     const trackLanes = {};
     const laneContents = {};
-    const playhead = document.createElement('div');
-    playhead.id = 'playhead';
+    let currentPlayheadY = 0;
 
     function rewindToStart() {
         syncPlayhead(0);
@@ -328,10 +327,13 @@
                         }
                     });
                 };
-                const onMouseUp = () => {
+                const onMouseUp = (me) => {
                     if (isMarquee) {
                         if (marqueeEl) marqueeEl.remove();
-                        if (Math.abs(e.clientX - startX) < 5 && Math.abs(e.clientY - startY) < 5) syncPlayhead(clickY);
+                        // 移動制限を解除：ドラッグ操作の後でも、マウスを離した位置へ再生バーを移動させます
+                        const rect = content.getBoundingClientRect();
+                        const endY = me.clientY - rect.top + content.scrollTop;
+                        syncPlayhead(endY);
                         isMarquee = false; marqueeEl = null;
                     }
                     document.removeEventListener('mousemove', onMouseMove);
@@ -343,6 +345,11 @@
         });
         
         lane.appendChild(content);
+
+        // 各レーンに再生バーを追加（赤いバーが一番右まで進むように）
+        const ph = document.createElement('div');
+        ph.className = 'playhead';
+        content.appendChild(ph);
 
         // スクロール同期の追加
         content.onscroll = () => {
@@ -368,12 +375,10 @@
             document.querySelectorAll('.note-block.selected').forEach(b => b.classList.remove('selected'));
         }
     });
-    
-    // 最初のレーンに再生バーを入れる
-    laneContents['piano'].appendChild(playhead);
 
     function syncPlayhead(y) {
-        playhead.style.top = y + 'px';
+        currentPlayheadY = y;
+        document.querySelectorAll('.playhead').forEach(ph => ph.style.top = y + 'px');
         nextTop = y; // キーボード入力の開始位置も同期
     }
 
@@ -503,7 +508,7 @@
         if (!isPlaying) return;
         const elapsed = audioCtx.currentTime - startTime;
         const currentTop = baseTop + (elapsed * ppsValue);
-        playhead.style.top = currentTop + 'px';
+        syncPlayhead(currentTop);
         
         Object.values(laneContents).forEach(content => {
             if (currentTop > content.scrollTop + content.clientHeight - 100) {
@@ -774,7 +779,7 @@
         analyser = audioCtx.createAnalyser(); analyser.fftSize = 2048;
         source.connect(analyser);
         recordStartTime = audioCtx.currentTime;
-        recordStartTop = parseFloat(playhead.style.top) || 0;
+        recordStartTop = currentPlayheadY;
         isRunning = true; 
         document.getElementById('toggleBtn').innerText = "🔴 録音中..."; 
         update();
@@ -1198,11 +1203,11 @@
 
     async function playMelody() {
         await initAudio(); if (isPlaying) return;
-        const startPos = parseFloat(playhead.style.top) || 0;
+        const startPos = currentPlayheadY;
         const allBlocks = Array.from(document.querySelectorAll('.note-block'))
             .filter(b => (parseFloat(b.style.top) + parseFloat(b.style.height)) > startPos)
             .sort((a, b) => parseFloat(a.style.top) - parseFloat(b.style.top));
-        if (allBlocks.length === 0) { playhead.style.top = '0px'; return; }
+        if (allBlocks.length === 0) { syncPlayhead(0); return; }
         isPlaying = true;
         try {
             const baseTime = audioCtx.currentTime + 0.1, baseTop = startPos;
@@ -1247,7 +1252,7 @@
         const chordDegrees = progressions[type];
         const barLength = pps * 2; 
         
-        let startTop = parseFloat(playhead.style.top) || 0;
+        let startTop = currentPlayheadY;
         let maxBottom = (pps * 16); 
 
         // 選択されたセクション（箱）があればその範囲を、なければ再生バーから8小節分
@@ -1292,7 +1297,7 @@
         const type = document.getElementById('drumSelect').value;
         saveHistory();
         
-        let startTop = parseFloat(playhead.style.top) || 0;
+        let startTop = currentPlayheadY;
         let maxBottom = (pps * 16);
 
         // 選択されたセクション（箱）があればその範囲を優先
