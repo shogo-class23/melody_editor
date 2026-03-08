@@ -95,7 +95,11 @@
         /* 全レーンを貫通する白い線 */
         .section-line {
             position: absolute; left: 0; width: 10000px; border-top: 2px dashed rgba(255, 255, 255, 0.8);
-            pointer-events: none; z-index: 5000;
+            z-index: 5000; pointer-events: auto; cursor: pointer;
+        }
+        /* 白い線の当たり判定を広げる（クリックしやすくするため） */
+        .section-line::after {
+            content: ""; position: absolute; top: -10px; left: 0; width: 100%; height: 20px;
         }
     </style>
 </head>
@@ -333,7 +337,18 @@
                         // 移動制限を解除：ドラッグ操作の後でも、マウスを離した位置へ再生バーを移動させます
                         const rect = content.getBoundingClientRect();
                         const endY = me.clientY - rect.top + content.scrollTop;
-                        syncPlayhead(endY);
+                        
+                        // 白い線（セクション境界）の近くをクリックした場合はピタッと吸着（スナップ）させる
+                        let finalY = endY;
+                        const snapThreshold = 15;
+                        document.querySelectorAll('.section-block').forEach(sb => {
+                            const sTop = parseFloat(sb.style.top);
+                            const sBottom = sTop + parseFloat(sb.style.height);
+                            if (Math.abs(endY - sTop) < snapThreshold) finalY = sTop;
+                            else if (Math.abs(endY - sBottom) < snapThreshold) finalY = sBottom;
+                        });
+                        syncPlayhead(finalY);
+
                         isMarquee = false; marqueeEl = null;
                     }
                     document.removeEventListener('mousemove', onMouseMove);
@@ -404,6 +419,11 @@
         Object.values(laneContents).forEach(lane => {
             const lineT = document.createElement('div'); lineT.className = 'section-line';
             const lineB = document.createElement('div'); lineB.className = 'section-line';
+            
+            // 白い線をクリックしたときにピタッと赤いバーを移動させる
+            lineT.onclick = (e) => { e.stopPropagation(); syncPlayhead(parseFloat(lineT.style.top)); };
+            lineB.onclick = (e) => { e.stopPropagation(); syncPlayhead(parseFloat(lineB.style.top)); };
+            
             lane.appendChild(lineT); lane.appendChild(lineB);
             dividers.push({ top: lineT, bottom: lineB });
         });
