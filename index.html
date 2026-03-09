@@ -240,6 +240,7 @@
         </select>
         <button class="btn" style="background:#00bcd4;" onclick="generateMeasurePhrase()">✨ 1小節フレーズ生成</button>
         <button class="btn" style="background:#4caf50;" onclick="bulkInputLyrics()">🎤 歌詞一括入力</button>
+        <button id="ttsBtn" class="btn" style="background:#607d8b;" onclick="toggleTTS()">🔊 読み上げ: OFF</button>
     </div>
     
     <div id="editor-layout">
@@ -808,6 +809,15 @@
         });
     }
 
+    let isTTSActive = false;
+    function toggleTTS() {
+        isTTSActive = !isTTSActive;
+        const btn = document.getElementById('ttsBtn');
+        btn.innerText = isTTSActive ? "🔊 読み上げ: ON" : "🔊 読み上げ: OFF";
+        btn.style.background = isTTSActive ? "#ff4081" : "#607d8b";
+        if (!isTTSActive) window.speechSynthesis.cancel();
+    }
+
     async function playMelody() {
         await initAudio(); if (isPlaying) return;
         const startPos = currentPlayheadY, allNotes = Array.from(document.querySelectorAll('.note-block'));
@@ -816,34 +826,41 @@
         isPlaying = true;
         const maxPos = Math.max(...allNotes.map(b => parseFloat(b.style.top) + parseFloat(b.style.height)));
         const bt = audioCtx.currentTime + 0.1; updatePlayhead(bt, startPos, pps, maxPos);
+        
         blocks.forEach(b => {
             const m = parseInt(b.dataset.midi), i = b.dataset.inst, t = parseFloat(b.style.top), h = parseFloat(b.style.height);
-            if (i === 'lyrics') return; // 歌詞は音を出さない
             const st = bt + Math.max(0, t - startPos) / pps, dur = h / pps;
+            
+            if (i === 'lyrics') {
+                // 読み上げ機能がONの場合
+                if (isTTSActive) {
+                    const txt = b.querySelector('.note-label').innerText;
+                    if (txt && txt !== "歌詞") {
+                        setTimeout(() => {
+                            if (!isPlaying || !isTTSActive) return;
+                            const ut = new SpeechSynthesisUtterance(txt);
+                            ut.lang = 'ja-JP';
+                            ut.rate = 1.2; // 少し速めに設定
+                            window.speechSynthesis.speak(ut);
+                        }, (st - audioCtx.currentTime) * 1000);
+                    }
+                }
+                return;
+            }
+            
             const { nodes } = createOscillator(m, st, dur, i); activeNodes.push(...nodes);
             setTimeout(() => { if(isPlaying) b.classList.add('playing'); }, (st - audioCtx.currentTime) * 1000);
             setTimeout(() => { b.classList.remove('playing'); }, (st + dur - audioCtx.currentTime) * 1000);
         });
     }
 
-    function bulkInputLyrics() {
-        const text = prompt("歌詞を一括入力してください（スペースや改行で区切ると各ノートに割り当てられます）:");
-        if (!text) return;
-        saveHistory();
-        const words = text.split(/[\s\n]+/).filter(w => w.length > 0);
-        const melodyNotes = Array.from(laneContents['melody'].querySelectorAll('.note-block')).sort((a, b) => parseFloat(a.style.top) - parseFloat(b.style.top));
-        
-        // 歌詞トラックにブロックを作成し、メロディのノートに合わせる
-        melodyNotes.forEach((b, i) => {
-            if (i < words.length) {
-                const t = parseFloat(b.style.top), h = parseFloat(b.style.height);
-                const lyricBlock = createNoteElement(0, t, h, 'lyrics');
-                lyricBlock.querySelector('.note-label').innerText = words[i];
-                laneContents['lyrics'].appendChild(lyricBlock);
-            }
-        });
+    function stopMelody() { 
+        isPlaying = false; 
+        activeNodes.forEach(n => { try { n.stop(); } catch(e){} }); 
+        activeNodes = []; 
+        document.querySelectorAll('.note-block').forEach(b => b.classList.remove('playing'));
+        window.speechSynthesis.cancel(); // 読み上げも停止
     }
-    function stopMelody() { isPlaying = false; activeNodes.forEach(n => { try { n.stop(); } catch(e){} }); activeNodes = []; document.querySelectorAll('.note-block').forEach(b => b.classList.remove('playing')); }
 
     function generateProgression() {
         let maxEnd = getMelodyEnd();
