@@ -733,28 +733,50 @@
     function stopMelody() { isPlaying = false; activeNodes.forEach(n => { try { n.stop(); } catch(e){} }); activeNodes = []; document.querySelectorAll('.note-block').forEach(b => b.classList.remove('playing')); }
 
     function generateProgression() {
-        const type = document.getElementById('progSelect').value, key = parseInt(document.getElementById('keySelect').value); saveHistory();
-        const progs = { canon: [0, 4, 5, 2, 3, 0, 3, 4], pop: [3, 4, 2, 5], komuro: [5, 3, 4, 0], simple: [0, 3, 4, 0] }, steps = [0, 2, 4, 5, 7, 9, 11], degs = progs[type], bl = pps * 2;
-        let st = currentPlayheadY, mb = st + pps * 4, s = document.querySelector('.section-block.selected');
-        if (s) { st = parseFloat(s.style.top); mb = st + parseFloat(s.style.height); }
+        const maxEnd = getMelodyEnd();
+        if (maxEnd <= 0) { alert("メロディデータが見つかりません。"); return; }
         
-        // 現在の小節番号を計算（0オリジン）
-        const measureIdx = Math.floor(st / (pps * 4));
+        saveHistory();
+        const originalPlayhead = currentPlayheadY;
+        const mH = pps * 4; 
         
-        let ct = st; while (ct < mb - 5) {
-            // 進行のループ内で適切なコードを選択
-            const progStep = (Math.floor((ct - st) / bl) + (measureIdx * 2)) % degs.length;
-            const d = degs[progStep];
-            
-            laneContents['bass'].appendChild(createNoteElement(key+steps[d]+36, ct, bl, 'bass'));
-            [0, 2, 4].forEach(idx => {
-                const tidx = (d + idx) % 7, oct = Math.floor((d + idx) / 7);
-                laneContents['guitar'].appendChild(createNoteElement(key+steps[tidx]+(oct*12)+52, ct, bl, 'guitar'));
-                laneContents['piano'].appendChild(createNoteElement(key+steps[tidx]+(oct*12)+64, ct, bl, 'piano'));
+        // 既存の進行ノートを現在の位置から末尾まで削除
+        ['bass', 'guitar', 'piano'].forEach(inst => {
+            const blocks = Array.from(laneContents[inst].querySelectorAll('.note-block'));
+            blocks.forEach(b => {
+                if (parseFloat(b.style.top) >= currentPlayheadY - 1) b.remove();
             });
-            ct += bl;
+        });
+
+        const type = document.getElementById('progSelect').value;
+        const key = parseInt(document.getElementById('keySelect').value);
+        const progs = { canon: [0, 4, 5, 2, 3, 0, 3, 4], pop: [3, 4, 2, 5], komuro: [5, 3, 4, 0], simple: [0, 3, 4, 0] };
+        const steps = [0, 2, 4, 5, 7, 9, 11];
+        const degs = progs[type];
+        const bl = pps * 2; 
+
+        let t = Math.floor(currentPlayheadY / mH) * mH;
+        while (t < maxEnd) {
+            const measureIdx = Math.floor(t / mH);
+            let ctProg = t;
+            const measureEnd = t + mH;
+            while (ctProg < measureEnd - 5) {
+                const progStep = (Math.floor((ctProg - t) / bl) + (measureIdx * 2)) % degs.length;
+                const d = degs[progStep];
+                
+                laneContents['bass'].appendChild(createNoteElement(key + steps[d] + 36, ctProg, bl, 'bass'));
+                [0, 2, 4].forEach(idx => {
+                    const tidx = (d + idx) % 7, oct = Math.floor((d + idx) / 7);
+                    laneContents['guitar'].appendChild(createNoteElement(key + steps[tidx] + (oct * 12) + 52, ctProg, bl, 'guitar'));
+                    laneContents['piano'].appendChild(createNoteElement(key + steps[tidx] + (oct * 12) + 64, ctProg, bl, 'piano'));
+                });
+                ctProg += bl;
+            }
+            t += mH;
         }
-        syncPlayhead(st); // すぐ確認できるように先頭へ
+        syncPlayhead(originalPlayhead);
+        updateMeasureNumbers();
+        alert(`🎹 「進行生成」をメロディの最後まで拡張しました。`);
     }
 
     function generateFullBackingMeasure() {
@@ -780,87 +802,78 @@
         if (maxEnd <= 0) { alert("メロディデータが見つかりません。"); return; }
 
         saveHistory();
-        const originalInst = document.getElementById('currentInst').value;
         const originalPlayhead = currentPlayheadY;
-        const mH = pps * 4; // 1小節の高さ
+        const mH = pps * 4; // 1小節の幅
         
-        // 1. 伴奏レーンを現在の位置から末尾まで完全にクリア（ゴミを残さない）
-        ['drums', 'bass', 'guitar'].forEach(inst => {
+        // 1. 伴奏レーンを現在の位置から末尾まで一掃
+        ['drums', 'bass', 'guitar', 'piano'].forEach(inst => {
             const blocks = Array.from(laneContents[inst].querySelectorAll('.note-block'));
             blocks.forEach(b => {
                 if (parseFloat(b.style.top) >= currentPlayheadY - 1) b.remove();
             });
         });
 
-        const progType = document.getElementById('progSelect').value;
-        const progs = { canon: [0, 4, 5, 2, 3, 0, 3, 4], pop: [3, 4, 2, 5], komuro: [5, 3, 4, 0], simple: [0, 3, 4, 0] };
-        const degs = progs[progType];
+        const type = document.getElementById('progSelect').value;
         const key = parseInt(document.getElementById('keySelect').value);
+        const progs = { canon: [0, 4, 5, 2, 3, 0, 3, 4], pop: [3, 4, 2, 5], komuro: [5, 3, 4, 0], simple: [0, 3, 4, 0] };
         const steps = [0, 2, 4, 5, 7, 9, 11];
-        const style = document.getElementById('phraseStyle').value;
+        const degs = progs[type];
         const drumType = document.getElementById('drumSelect').value;
+        const bl = pps * 2; 
 
-        // 2. 生成ループ：現在の再生ヘッド位置から「データの終端」を超えるまで
+        // 2. メロディの最後（maxEnd）まで1小節ずつループ
         let t = Math.floor(currentPlayheadY / mH) * mH;
-        
-        // 【重要】ここが生成のリミットを外すループです
         while (t < maxEnd) {
             const measureIdx = Math.floor(t / mH);
             
-            // --- ドラム・ストリーム生成 ---
+            // --- ドラム生成（あなたが「合っている」と言ってくれた1小節ロジック） ---
             const h8 = pps / 2;
             for (let i = 0; i < 8; i++) {
                 const ct = t + i * h8;
                 if (drumType === 'four' || drumType === 'four_beat') {
-                    if (i % 2 === 0) { createAndAddNote(36, ct, h8 * 2, 'drums'); if (i % 4 === 2) createAndAddNote(38, ct, h8 * 2, 'drums'); }
+                    if (i % 2 === 0) { 
+                        laneContents['drums'].appendChild(createNoteElement(36, ct, h8 * 2, 'drums'));
+                        if (i % 4 === 2) laneContents['drums'].appendChild(createNoteElement(38, ct, h8 * 2, 'drums'));
+                    }
                 } else if (drumType === 'eight_beat') {
-                    if (i % 2 === 0) createAndAddNote(36, ct, h8, 'drums');
-                    if (i === 2 || i === 6) createAndAddNote(38, ct, h8, 'drums');
-                    createAndAddNote(42, ct, h8, 'drums');
+                    if (i % 2 === 0) laneContents['drums'].appendChild(createNoteElement(36, ct, h8, 'drums'));
+                    if (i === 2 || i === 6) laneContents['drums'].appendChild(createNoteElement(38, ct, h8, 'drums'));
+                    laneContents['drums'].appendChild(createNoteElement(42, ct, h8, 'drums'));
                 } else if (drumType === 'sixteen_beat') {
                     const h16 = pps / 4;
                     for(let j=0; j<2; j++) {
                         const ct16 = ct + j * h16;
-                        if (i % 4 === 0 && j === 0) createAndAddNote(36, ct16, h16 * 2, 'drums');
-                        if ((i === 2 || i === 6) && j === 0) createAndAddNote(38, ct16, h16 * 2, 'drums');
-                        createAndAddNote(42, ct16, h16, 'drums');
+                        if (i % 4 === 0 && j === 0) laneContents['drums'].appendChild(createNoteElement(36, ct16, h16 * 2, 'drums'));
+                        if ((i === 2 || i === 6) && j === 0) laneContents['drums'].appendChild(createNoteElement(38, ct16, h16 * 2, 'drums'));
+                        laneContents['drums'].appendChild(createNoteElement(42, ct16, h16, 'drums'));
                     }
                 }
             }
 
-            // --- ベース & ギター・ストリーム生成 ---
-            for (let stepInM = 0; stepInM < 2; stepInM++) {
-                const ct = t + stepInM * (pps * 2);
-                const pIdx = (measureIdx * 2 + stepInM) % degs.length;
-                const d = degs[pIdx];
-                const root = key + steps[d];
+            // --- 進行生成（ベース・ギター・ピアノをコードに合わせて配置） ---
+            let ctProg = t;
+            const measureEnd = t + mH;
+            while (ctProg < measureEnd - 5) {
+                const progStep = (Math.floor((ctProg - t) / bl) + (measureIdx * 2)) % degs.length;
+                const d = degs[progStep];
                 
                 // ベース
-                const bRoot = root + 36;
-                for (let j = 0; j < 4; j++) {
-                    const nt = ct + j * (pps / 2);
-                    if (style === 'basic' && j % 2 === 0) createAndAddNote(bRoot, nt, pps, 'bass');
-                    else if (style === 'pop' || style === 'rock') createAndAddNote(bRoot, nt, pps / 2, 'bass');
-                    else if (style === 'dance' && (j === 0 || j === 3)) createAndAddNote(bRoot, nt, pps / 2, 'bass');
-                    else if (style === 'cool') createAndAddNote(bRoot + [0, 7, 0, 10][j], nt, pps / 2, 'bass');
-                }
-
-                // ギター
-                const gChords = [root + 48, root + 52, root + 55];
-                if (style === 'basic' || style === 'rock') { gChords.forEach(n => createAndAddNote(n, ct, pps * 2, 'guitar')); }
-                else if (style === 'pop') { gChords.forEach(n => createAndAddNote(n, ct, pps * 0.8, 'guitar')); }
-                else if (style === 'dance') { gChords.forEach(n => createAndAddNote(n, ct + pps, pps, 'guitar')); }
-                else if (style === 'cool') { gChords.forEach((n, idx) => createAndAddNote(n, ct + idx * (pps/4), pps/4, 'guitar')); }
+                laneContents['bass'].appendChild(createNoteElement(key + steps[d] + 36, ctProg, bl, 'bass'));
+                // ギター & ピアノ
+                [0, 2, 4].forEach(idx => {
+                    const tidx = (d + idx) % 7, oct = Math.floor((d + idx) / 7);
+                    laneContents['guitar'].appendChild(createNoteElement(key + steps[tidx] + (oct * 12) + 52, ctProg, bl, 'guitar'));
+                    laneContents['piano'].appendChild(createNoteElement(key + steps[tidx] + (oct * 12) + 64, ctProg, bl, 'piano'));
+                });
+                ctProg += bl;
             }
 
-            t += mH; // 確実に1小節分進める
+            t += mH; // 次の小節へ
         }
         
-        // 3. UIの復元と拡張
-        document.getElementById('currentInst').value = originalInst;
         syncPlayhead(originalPlayhead);
-        updateMeasureNumbers(); // 小節表示を最新の長さに更新
-        alert(`🎹 データの末尾（座標: ${Math.round(maxEnd)}px）まで全小節の伴奏を生成しました。`);
+        updateMeasureNumbers();
+        alert(`🎹 「進行生成」と「ドラム生成」をメロディの最後まで拡張しました。`);
     }
 
     function getMelodyEnd() {
@@ -924,44 +937,51 @@
     }
 
     function generateDrum(skipHistory = false) {
+        const maxEnd = getMelodyEnd();
+        if (maxEnd <= 0) { alert("メロディデータが見つかりません。"); return; }
+
         const type = document.getElementById('drumSelect').value;
         const mH = pps * 4;
         const startTop = Math.floor(currentPlayheadY / mH) * mH;
         if (!skipHistory) saveHistory();
         
-        // 既存音符のクリア
+        // 既存音符のクリア（現在の位置から末尾まで）
         const existing = Array.from(laneContents['drums'].querySelectorAll('.note-block'));
         existing.forEach(b => {
-            const t = parseFloat(b.style.top), h = parseFloat(b.style.height);
-            if (t < startTop + mH - 1 && t + h > startTop + 1) b.remove();
+            if (parseFloat(b.style.top) >= startTop - 1) b.remove();
         });
 
         // 音符の高さを拍の長さに合わせる (8分音符 = pps/2)
         const h8 = pps / 2;
         const addD = (m, t, h) => laneContents['drums'].appendChild(createNoteElement(m, t, h, 'drums'));
         
-        for (let i = 0; i < 8; i++) {
-            const ct = startTop + i * h8;
-            if (type === 'four' || type === 'four_beat') {
-                if (i % 2 === 0) { 
-                    addD(36, ct, h8 * 2); // 4分音符の長さ
-                    if (i % 4 === 2) addD(38, ct, h8 * 2);
-                }
-            } else if (type === 'eight_beat') {
-                if (i % 2 === 0) addD(36, ct, h8); 
-                if (i === 2 || i === 6) addD(38, ct, h8);
-                addD(42, ct, h8); // 8分音符の長さで隙間なく埋める
-            } else if (type === 'sixteen_beat') {
-                const h16 = pps / 4;
-                for(let j=0; j<2; j++) {
-                    const ct16 = ct + j * h16;
-                    if (i % 4 === 0 && j === 0) addD(36, ct16, h16 * 2);
-                    if ((i === 2 || i === 6) && j === 0) addD(38, ct16, h16 * 2);
-                    addD(42, ct16, h16);
+        let t = startTop;
+        while (t < maxEnd) {
+            for (let i = 0; i < 8; i++) {
+                const ct = t + i * h8;
+                if (type === 'four' || type === 'four_beat') {
+                    if (i % 2 === 0) { 
+                        addD(36, ct, h8 * 2); // 4分音符の長さ
+                        if (i % 4 === 2) addD(38, ct, h8 * 2);
+                    }
+                } else if (type === 'eight_beat') {
+                    if (i % 2 === 0) addD(36, ct, h8); 
+                    if (i === 2 || i === 6) addD(38, ct, h8);
+                    addD(42, ct, h8); // 8分音符の長さで隙間なく埋める
+                } else if (type === 'sixteen_beat') {
+                    const h16 = pps / 4;
+                    for(let j=0; j<2; j++) {
+                        const ct16 = ct + j * h16;
+                        if (i % 4 === 0 && j === 0) addD(36, ct16, h16 * 2);
+                        if ((i === 2 || i === 6) && j === 0) addD(38, ct16, h16 * 2);
+                        addD(42, ct16, h16);
+                    }
                 }
             }
+            t += mH;
         }
         syncPlayhead(startTop);
+        if (!skipHistory) alert(`🥁 「ドラム生成」をメロディの最後まで拡張しました。`);
     }
 
     function generateMeasurePhrase(skipHistory = false) {
