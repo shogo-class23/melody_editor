@@ -54,6 +54,21 @@
         .note-block.selected { border: 2px solid yellow; box-shadow: 0 0 10px yellow; z-index: 50; }
         .note-block.playing { border: 3px solid white; box-shadow: 0 0 20px white; z-index: 100; background-color: #fff !important; color: #000; }
         
+        .lyrics-block {
+            background-color: #00e676 !important;
+            color: #000 !important;
+            font-size: 14px !important;
+            border: 1px solid #fff !important;
+            justify-content: flex-start !important;
+            padding-left: 5px;
+            overflow: visible !important;
+            white-space: nowrap;
+        }
+        .lyrics-block .note-label {
+            width: 100%;
+            text-align: left;
+        }
+
         .marquee {
             position: absolute; border: 1px solid #2196f3; background: rgba(33, 150, 243, 0.2);
             pointer-events: none; z-index: 3000;
@@ -140,6 +155,7 @@
         <button class="btn" style="background:#ffc107; color: black;" onclick="generateChord()">✨ 和音作成</button>
         <button class="btn" style="background:#7e57c2;" onclick="generateBass()">🎸 ベース作成</button>
         <button class="btn" style="background:#ff7043;" onclick="generateGuitar()">🎸 ギター作成</button>
+        <button class="btn" style="background:#00e676; color: black;" onclick="generateLyricsFromMelody()">🎤 歌詞作成</button>
         <select id="chordSize" class="btn" style="background:#333; color:white; border:1px solid #ff7043;">
             <option value="3">3和音</option>
             <option value="4">4和音</option>
@@ -158,6 +174,7 @@
         <span style="margin: 0 10px; border-left: 1px solid #555;"></span>
         <label style="font-size: 12px; vertical-align: middle;">現在の楽器:</label>
         <select id="currentInst" class="btn" style="background:#333; color:white; border:1px solid #ff9800;">
+            <option value="lyrics">🎤 歌詞</option>
             <option value="melody" selected>🎹 メロディー</option>
             <option value="piano">🎹 ピアノ</option>
             <option value="guitar">🎸 ギター</option>
@@ -222,6 +239,7 @@
             <option value="dance">ダンス</option>
         </select>
         <button class="btn" style="background:#00bcd4;" onclick="generateMeasurePhrase()">✨ 1小節フレーズ生成</button>
+        <button class="btn" style="background:#4caf50;" onclick="bulkInputLyrics()">🎤 歌詞一括入力</button>
     </div>
     
     <div id="editor-layout">
@@ -239,6 +257,7 @@
 <script>
     const noteNames = ["ド", "ド#", "レ", "レ#", "ミ", "ファ", "ファ#", "ソ", "ソ#", "ラ", "ラ#", "シ"];
     const instrumentConfigs = {
+        lyrics: { name: "🎤 歌詞", colors: ["#00e676"] },
         melody: { name: "🎹 メロディー", colors: ["#448AFF", "#2979FF", "#2962FF", "#1565C0"] },
         piano: { name: "🎹 ピアノ", colors: ["#FF4081", "#F50057", "#C51162", "#880E4F"] },
         guitar: { name: "🎸 ギター", colors: ["#FF7043", "#F4511E", "#E64A19", "#BF360C"] },
@@ -305,6 +324,7 @@
         const lane = document.createElement('div');
         lane.className = 'track-lane';
         lane.id = `lane-${instId}`;
+        if (instId === 'lyrics') lane.style.minWidth = "120px";
         
         const header = document.createElement('div');
         header.className = 'track-header';
@@ -320,7 +340,13 @@
         const pianoContainer = document.createElement('div');
         pianoContainer.className = 'piano-container';
         
-        if (instId === 'drums') {
+        if (instId === 'lyrics') {
+            const div = document.createElement('div');
+            div.id = `key-${instId}-0`; div.className = 'key lyrics-key';
+            div.style.minWidth = "120px"; div.innerText = "歌詞エリア";
+            div.addEventListener('mousedown', (e) => { e.preventDefault(); document.getElementById('currentInst').value = instId; startKeyNote(0); });
+            pianoContainer.appendChild(div);
+        } else if (instId === 'drums') {
             const drumMap = { 36: "ドン", 38: "タン", 42: "チッ" };
             [36, 38, 42].forEach(num => {
                 const div = document.createElement('div');
@@ -395,6 +421,15 @@
     });
 
     window.addEventListener('mouseup', stopKeyNote);
+    
+    // キーボードショートカット (Ctrl+C, Ctrl+V)
+    window.addEventListener('keydown', (e) => {
+        if (e.ctrlKey && e.key === 'c') {
+            e.preventDefault(); copySelected();
+        } else if (e.ctrlKey && e.key === 'v') {
+            e.preventDefault(); pasteSelected();
+        }
+    });
 
     function detectKeyFromMelody() {
         const blocks = Array.from(document.querySelectorAll('.note-block'));
@@ -675,12 +710,28 @@
 
     function createNoteElement(num, top, height, inst) {
         const b = document.createElement('div'); b.className = 'note-block';
-        const keyEl = document.getElementById(`key-${inst}-${num}`), rect = keyEl.getBoundingClientRect(), crect = laneContents[inst].getBoundingClientRect();
+        if (inst === 'lyrics') b.classList.add('lyrics-block');
+        
+        const targetMidi = (inst === 'lyrics') ? 0 : num;
+        const keyEl = document.getElementById(`key-${inst}-${targetMidi}`), rect = keyEl.getBoundingClientRect(), crect = laneContents[inst].getBoundingClientRect();
         b.style.width = (rect.width - 2) + 'px'; b.style.left = (rect.left - crect.left) + 'px'; b.style.top = top + 'px'; b.style.height = height + 'px';
+        
         let txt = noteNames[num % 12], bg = getInstColor(inst, num);
         if (inst === 'drums') { if (num === 36) { txt = "ドン"; bg = "#f44336"; } else if (num === 38) { txt = "タン"; bg = "#2196f3"; } else if (num === 42) { txt = "チッ"; bg = "#ffeb3b"; b.style.color = "#000"; } }
+        else if (inst === 'lyrics') { txt = "歌詞"; bg = "#00e676"; b.style.color = "#000"; }
+        
         b.style.backgroundColor = bg; const l = document.createElement('span'); l.className = 'note-label'; l.innerText = txt; b.appendChild(l);
         b.dataset.midi = num; b.dataset.inst = inst; const r = document.createElement('div'); r.className = 'resizer'; b.appendChild(r);
+        
+        if (inst === 'lyrics') {
+            b.ondblclick = (e) => {
+                e.stopPropagation();
+                const oldT = l.innerText;
+                const newT = prompt("歌詞を入力してください:", oldT);
+                if (newT !== null) { saveHistory(); l.innerText = newT; }
+            };
+        }
+        
         makeInteractive(b, r); return b;
     }
 
@@ -724,10 +775,29 @@
         const bt = audioCtx.currentTime + 0.1; updatePlayhead(bt, startPos, pps, maxPos);
         blocks.forEach(b => {
             const m = parseInt(b.dataset.midi), i = b.dataset.inst, t = parseFloat(b.style.top), h = parseFloat(b.style.height);
+            if (i === 'lyrics') return; // 歌詞は音を出さない
             const st = bt + Math.max(0, t - startPos) / pps, dur = h / pps;
             const { nodes } = createOscillator(m, st, dur, i); activeNodes.push(...nodes);
             setTimeout(() => { if(isPlaying) b.classList.add('playing'); }, (st - audioCtx.currentTime) * 1000);
             setTimeout(() => { b.classList.remove('playing'); }, (st + dur - audioCtx.currentTime) * 1000);
+        });
+    }
+
+    function bulkInputLyrics() {
+        const text = prompt("歌詞を一括入力してください（スペースや改行で区切ると各ノートに割り当てられます）:");
+        if (!text) return;
+        saveHistory();
+        const words = text.split(/[\s\n]+/).filter(w => w.length > 0);
+        const melodyNotes = Array.from(laneContents['melody'].querySelectorAll('.note-block')).sort((a, b) => parseFloat(a.style.top) - parseFloat(b.style.top));
+        
+        // 歌詞トラックにブロックを作成し、メロディのノートに合わせる
+        melodyNotes.forEach((b, i) => {
+            if (i < words.length) {
+                const t = parseFloat(b.style.top), h = parseFloat(b.style.height);
+                const lyricBlock = createNoteElement(0, t, h, 'lyrics');
+                lyricBlock.querySelector('.note-label').innerText = words[i];
+                laneContents['lyrics'].appendChild(lyricBlock);
+            }
         });
     }
     function stopMelody() { isPlaying = false; activeNodes.forEach(n => { try { n.stop(); } catch(e){} }); activeNodes = []; document.querySelectorAll('.note-block').forEach(b => b.classList.remove('playing')); }
@@ -807,7 +877,7 @@
         const mH = pps * 4; // 1小節の幅
         
         // 1. 伴奏レーンを現在の位置から末尾まで一掃
-        ['drums', 'bass', 'guitar', 'piano'].forEach(inst => {
+        ['drums', 'bass', 'guitar', 'piano', 'lyrics'].forEach(inst => {
             const blocks = Array.from(laneContents[inst].querySelectorAll('.note-block'));
             blocks.forEach(b => {
                 if (parseFloat(b.style.top) >= currentPlayheadY - 1) b.remove();
@@ -827,7 +897,7 @@
         while (t < maxEnd) {
             const measureIdx = Math.floor(t / mH);
             
-            // --- ドラム生成（あなたが「合っている」と言ってくれた1小節ロジック） ---
+            // --- ドラム生成 ---
             const h8 = pps / 2;
             for (let i = 0; i < 8; i++) {
                 const ct = t + i * h8;
@@ -851,16 +921,13 @@
                 }
             }
 
-            // --- 進行生成（ベース・ギター・ピアノをコードに合わせて配置） ---
+            // --- 進行生成 ---
             let ctProg = t;
             const measureEnd = t + mH;
             while (ctProg < measureEnd - 5) {
                 const progStep = (Math.floor((ctProg - t) / bl) + (measureIdx * 2)) % degs.length;
                 const d = degs[progStep];
-                
-                // ベース
                 laneContents['bass'].appendChild(createNoteElement(key + steps[d] + 36, ctProg, bl, 'bass'));
-                // ギター & ピアノ
                 [0, 2, 4].forEach(idx => {
                     const tidx = (d + idx) % 7, oct = Math.floor((d + idx) / 7);
                     laneContents['guitar'].appendChild(createNoteElement(key + steps[tidx] + (oct * 12) + 52, ctProg, bl, 'guitar'));
@@ -869,12 +936,23 @@
                 ctProg += bl;
             }
 
-            t += mH; // 次の小節へ
+            // --- 歌詞の土台作成 (メロディのリズムに合わせる) ---
+            const melodyInMeasure = Array.from(laneContents['melody'].querySelectorAll('.note-block')).filter(b => {
+                const top = parseFloat(b.style.top);
+                return top >= t && top < t + mH;
+            });
+            melodyInMeasure.forEach(mb => {
+                const lb = createNoteElement(0, parseFloat(mb.style.top), parseFloat(mb.style.height), 'lyrics');
+                lb.querySelector('.note-label').innerText = "歌詞";
+                laneContents['lyrics'].appendChild(lb);
+            });
+
+            t += mH; 
         }
         
         syncPlayhead(originalPlayhead);
         updateMeasureNumbers();
-        alert(`🎹 伴奏を一括生成しました。`);
+        alert(`🎹 伴奏と歌詞の土台を一括生成しました。`);
     }
 
     function getMelodyEnd() {
@@ -1029,6 +1107,19 @@
                     addNote(42, ct, 20, 'drums');
                 }
             }
+        } else if (inst === 'lyrics') {
+            const melodyInMeasure = Array.from(laneContents['melody'].querySelectorAll('.note-block')).filter(b => {
+                const t = parseFloat(b.style.top);
+                return t >= startTop && t < startTop + mH;
+            });
+            if (melodyInMeasure.length > 0) {
+                melodyInMeasure.forEach(mb => {
+                    const lb = addNote(0, parseFloat(mb.style.top), parseFloat(mb.style.height), 'lyrics');
+                    lb.querySelector('.note-label').innerText = "歌詞";
+                });
+            } else {
+                for (let i = 0; i < 4; i++) addNote(0, startTop + i * pps, pps, 'lyrics').querySelector('.note-label').innerText = "歌詞";
+            }
         } else if (inst === 'bass') {
             const root = scale[0] + 36;
             for (let i = 0; i < 8; i++) {
@@ -1070,9 +1161,58 @@
 
     function deleteSelected() { saveHistory(); document.querySelectorAll('.note-block.selected').forEach(b => b.remove()); }
     function copySelected() { const s = Array.from(document.querySelectorAll('.note-block.selected')); if(s.length) clipboard = s.map(b => ({ midi: b.dataset.midi, inst: b.dataset.inst, top: parseFloat(b.style.top), left: b.style.left, height: b.style.height, text: b.querySelector('.note-label').innerText })); }
-    function pasteSelected() { if(!clipboard.length) return; saveHistory(); clipboard.forEach(d => { const b = createNoteElement(parseInt(d.midi), d.top + 50, parseFloat(d.height), d.inst); b.style.left = d.left; b.querySelector('.note-label').innerText = d.text; laneContents[d.inst].appendChild(b); }); }
+    function pasteSelected() {
+        if(!clipboard.length) return;
+        saveHistory();
+        const targetInst = document.getElementById('currentInst').value;
+        clipboard.forEach(d => {
+            let targetMidi = parseInt(d.midi);
+            // 貼り付け先が歌詞レーンの場合、MIDI番号を強制的に0にする
+            if (targetInst === 'lyrics') targetMidi = 0;
+            // 貼り付け先がドラムで、元がドラム以外の場合は適当な音(36:キック)にする
+            else if (targetInst === 'drums' && d.inst !== 'drums') targetMidi = 36;
+            
+            const b = createNoteElement(targetMidi, d.top + 50, parseFloat(d.height), targetInst);
+            // 歌詞レーンの場合はテキストを維持、それ以外はMIDI名に更新
+            if (targetInst === 'lyrics') {
+                b.querySelector('.note-label').innerText = d.text;
+            }
+            laneContents[targetInst].appendChild(b);
+        });
+    }
     function shiftOctave(d) { saveHistory(); document.querySelectorAll('.note-block.selected').forEach(el => { let m = parseInt(el.dataset.midi) + d*12; if(m>=36 && m<=83) { el.dataset.midi = m; updateLabel(el); } }); }
-    function updateLabel(el) { const i = el.dataset.inst, m = parseInt(el.dataset.midi), k = document.getElementById(`key-${i}-${m}`), rect = k.getBoundingClientRect(), crect = laneContents[i].getBoundingClientRect(); el.style.left = (rect.left - crect.left) + 'px'; el.style.width = (rect.width-2)+'px'; el.style.backgroundColor = getInstColor(i, m); el.querySelector('.note-label').innerText = noteNames[m%12]; }
+    function updateLabel(el) { 
+        const i = el.dataset.inst, m = parseInt(el.dataset.midi);
+        const targetMidi = (i === 'lyrics') ? 0 : m;
+        const k = document.getElementById(`key-${i}-${targetMidi}`), rect = k.getBoundingClientRect(), crect = laneContents[i].getBoundingClientRect(); 
+        el.style.left = (rect.left - crect.left) + 'px'; el.style.width = (rect.width-2)+'px'; 
+        el.style.backgroundColor = getInstColor(i, m); 
+        if (i !== 'lyrics') {
+            el.querySelector('.note-label').innerText = (i === 'drums') ? el.querySelector('.note-label').innerText : noteNames[m%12]; 
+        }
+    }
+
+    function generateLyricsFromMelody() {
+        const mH = pps * 4;
+        const startT = Math.floor(currentPlayheadY / mH) * mH;
+        
+        let sel = Array.from(document.querySelectorAll('.note-block.selected')).filter(b => b.dataset.inst === 'melody');
+        if (sel.length === 0) {
+            sel = Array.from(laneContents['melody'].querySelectorAll('.note-block')).filter(b => {
+                const t = parseFloat(b.style.top);
+                return t >= startT && t < startT + mH;
+            });
+        }
+        if (sel.length === 0) { alert("メロディを選択するか、現在の小節にメロディを置いてください。"); return; }
+        saveHistory();
+        
+        sel.forEach(mb => {
+            const lb = createNoteElement(0, parseFloat(mb.style.top), parseFloat(mb.style.height), 'lyrics');
+            lb.querySelector('.note-label').innerText = "歌詞";
+            laneContents['lyrics'].appendChild(lb);
+        });
+    }
+
     function alignNoteEnds() { saveHistory(); const s = Array.from(document.querySelectorAll('.note-block.selected')); if(s.length<2) return; const max = Math.max(...s.map(b => parseFloat(b.style.top)+parseFloat(b.style.height))); s.forEach(b => b.style.height = (max - parseFloat(b.style.top)) + 'px'); }
     function mergeSelected() { saveHistory(); const s = Array.from(document.querySelectorAll('.note-block.selected')).sort((a,b)=>parseFloat(a.style.top)-parseFloat(b.style.top)); if(s.length<2) return; const t = parseFloat(s[0].style.top), b = Math.max(...s.map(x=>parseFloat(x.style.top)+parseFloat(x.style.height))), m = s[0].dataset.midi, i = s[0].dataset.inst; s.forEach(x=>x.remove()); laneContents[i].appendChild(createNoteElement(m, t, b-t, i)); }
     function splitSelected() { saveHistory(); document.querySelectorAll('.note-block.selected').forEach(b => { const h = parseFloat(b.style.height)/2, t = parseFloat(b.style.top), m = b.dataset.midi, i = b.dataset.inst; if(h<15) return; b.remove(); laneContents[i].appendChild(createNoteElement(m, t, h, i)); laneContents[i].appendChild(createNoteElement(m, t+h, h, i)); }); }
