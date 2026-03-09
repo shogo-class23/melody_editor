@@ -1210,13 +1210,17 @@
         const targetInst = document.getElementById('currentInst').value;
         clipboard.forEach(d => {
             let targetMidi = parseInt(d.midi);
-            // 貼り付け先が歌詞レーンの場合、MIDI番号を強制的に0にする
+            let targetTop = d.top;
+
+            // 同じ楽器に貼り付ける場合は1拍分(+pps)下にずらす
+            if (targetInst === d.inst) {
+                targetTop += pps;
+            }
+
             if (targetInst === 'lyrics') targetMidi = 0;
-            // 貼り付け先がドラムで、元がドラム以外の場合は適当な音(36:キック)にする
             else if (targetInst === 'drums' && d.inst !== 'drums') targetMidi = 36;
             
-            const b = createNoteElement(targetMidi, d.top + 50, parseFloat(d.height), targetInst);
-            // 歌詞レーンの場合はテキストを維持、それ以外はMIDI名に更新
+            const b = createNoteElement(targetMidi, targetTop, parseFloat(d.height), targetInst);
             if (targetInst === 'lyrics') {
                 b.querySelector('.note-label').innerText = d.text;
             }
