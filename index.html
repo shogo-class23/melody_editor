@@ -41,7 +41,7 @@
         .lane-content::-webkit-scrollbar { width: 8px; }
         .lane-content::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; }
 
-        .note-block { position: absolute; border-radius: 4px; font-size: 11px; font-weight: bold; color: white; display: flex; justify-content: center; align-items: center; cursor: grab; user-select: none; box-shadow: 0 0 5px rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); min-height: 15px; }
+        .note-block { position: absolute; border-radius: 4px; font-size: 11px; font-weight: bold; color: white; display: flex; justify-content: center; align-items: center; cursor: grab; user-select: none; box-shadow: 0 0 5px rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); min-height: 15px; box-sizing: border-box; }
         
         .resizer { 
             position: absolute; bottom: 0; left: 0; width: 100%; height: 8px; 
@@ -202,6 +202,22 @@
             <option value="sixteen_beat">16ビート</option>
         </select>
         <button class="btn" style="background:#757575;" onclick="generateDrum()">🥁 ドラム生成</button>
+        <span style="margin: 0 10px; border-left: 1px solid #555;"></span>
+        <button id="stepInputBtn" class="btn" style="background:#607d8b;" onclick="toggleStepInput()">🎹 ステップ入力: OFF</button>
+        <select id="stepSize" class="btn" style="background:#333; color:white; border:1px solid #607d8b;">
+            <option value="0.25">16分</option>
+            <option value="0.5" selected>8分</option>
+            <option value="1">4分</option>
+            <option value="2">2分</option>
+        </select>
+        <select id="phraseStyle" class="btn" style="background:#333; color:white; border:1px solid #00bcd4;">
+            <option value="basic">基本</option>
+            <option value="pop">ポップ</option>
+            <option value="rock">ロック</option>
+            <option value="cool">クール</option>
+            <option value="dance">ダンス</option>
+        </select>
+        <button class="btn" style="background:#00bcd4;" onclick="generateMeasurePhrase()">✨ 1小節フレーズ生成</button>
     </div>
     
     <div id="editor-layout">
@@ -549,14 +565,53 @@
     async function initAudio() { if (!audioCtx) { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); masterGain = audioCtx.createGain(); masterGain.gain.value = 0.7; masterGain.connect(audioCtx.destination); } if (audioCtx.state === 'suspended') await audioCtx.resume(); }
 
     let pressedKey = -1, keyNodes = null, keyGain = null;
+    let isStepInput = false;
+
+    function toggleStepInput() {
+        isStepInput = !isStepInput;
+        document.getElementById('stepInputBtn').innerText = isStepInput ? "🎹 ステップ入力: ON" : "🎹 ステップ入力: OFF";
+        document.getElementById('stepInputBtn').style.background = isStepInput ? "#ff4081" : "#607d8b";
+    }
+
     async function startKeyNote(num) {
         await initAudio(); if (pressedKey !== -1) stopKeyNote(); pressedKey = num;
-        const { g, nodes } = createOscillator(num, audioCtx.currentTime); keyGain = g; keyNodes = nodes;
-        const inst = document.getElementById('currentInst').value, keyEl = document.getElementById(`key-${inst}-${num}`);
-        if (keyEl) keyEl.classList.add('active'); if (!isRunning) { saveHistory(); update(); }
+        const inst = document.getElementById('currentInst').value;
+        const { g, nodes } = createOscillator(num, audioCtx.currentTime, -1, inst); keyGain = g; keyNodes = nodes;
+        const keyEl = document.getElementById(`key-${inst}-${num}`);
+        if (keyEl) keyEl.classList.add('active'); 
+        
+        if (isStepInput) {
+            saveHistory();
+            const step = parseFloat(document.getElementById('stepSize').value);
+            const dur = pps * step;
+            const b = createNoteElement(num, currentPlayheadY, dur, inst);
+            laneContents[inst].appendChild(b);
+            syncPlayhead(currentPlayheadY + dur);
+        } else if (!isRunning) { 
+            saveHistory(); update(); 
+        }
     }
     function stopKeyNote() {
         if (pressedKey === -1) return; const inst = document.getElementById('currentInst').value;
+        
+        // 離した瞬間にスナップ処理を入れる
+        if (currentBlock) {
+            const vTop = parseFloat(currentBlock.style.top), vH = parseFloat(currentBlock.style.height);
+            const vBottom = vTop + vH;
+            const nearestLine = Math.round(vBottom / pps) * pps;
+            if (Math.abs(vBottom - nearestLine) < 25) { // 25px以内なら吸着
+                const newH = Math.max(4, nearestLine - vTop);
+                const dh = newH - vH;
+                currentBlock.style.height = newH + 'px';
+                // 下にある音符をずらす
+                document.querySelectorAll('.note-block').forEach(b => {
+                    if (b !== currentBlock && parseFloat(b.style.top) >= vTop + vH - 1) {
+                        b.style.top = (parseFloat(b.style.top) + dh) + 'px';
+                    }
+                });
+            }
+        }
+
         if (keyGain) { keyGain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1); setTimeout(() => { if(keyNodes) keyNodes.forEach(n => { try { n.stop(); } catch(e){} }); }, 200); }
         const keyEl = document.getElementById(`key-${inst}-${pressedKey}`); if (keyEl) keyEl.classList.remove('active'); pressedKey = -1; currentBlock = null; lastNoteNumber = -1;
     }
@@ -614,7 +669,7 @@
     function createNoteElement(num, top, height, inst) {
         const b = document.createElement('div'); b.className = 'note-block';
         const keyEl = document.getElementById(`key-${inst}-${num}`), rect = keyEl.getBoundingClientRect(), crect = laneContents[inst].getBoundingClientRect();
-        b.style.width = (rect.width - 2) + 'px'; b.style.left = (rect.left - crect.left) + 'px'; b.style.top = top + 'px'; b.style.height = height + 'px';
+        b.style.width = (rect.width - 2) + 'px'; b.style.left = (rect.left - crect.left) + 'px'; b.style.top = (top - 10) + 'px'; b.style.height = height + 'px';
         let txt = noteNames[num % 12], bg = getInstColor(inst, num);
         if (inst === 'drums') { if (num === 36) { txt = "ドン"; bg = "#f44336"; } else if (num === 38) { txt = "タン"; bg = "#2196f3"; } else if (num === 42) { txt = "チッ"; bg = "#ffeb3b"; b.style.color = "#000"; } }
         b.style.backgroundColor = bg; const l = document.createElement('span'); l.className = 'note-label'; l.innerText = txt; b.appendChild(l);
@@ -630,7 +685,26 @@
             if (isR) { const nh = Math.max(15, sh + (e.clientY - sy)), dh = nh - sh; el.style.height = nh + 'px'; allOther.forEach(n => { if (n.el !== el && n.t >= st + sh - 1) n.el.style.top = (n.t + dh) + 'px'; }); }
             else if (isD) { const dy = e.clientY - smy, dx = e.clientX - smx; sn.forEach(i => { i.el.style.top = (i.t + dy) + 'px'; i.el.style.left = (i.l + dx) + 'px'; updateLabel(i.el); }); }
         });
-        window.addEventListener('mouseup', () => { isD = isR = false; });
+        window.addEventListener('mouseup', () => { 
+            if (isR) {
+                // リサイズ終了時のスナップ処理
+                const vTop = parseFloat(el.style.top), vH = parseFloat(el.style.height);
+                const vBottom = vTop + vH;
+                const nearestLine = Math.round(vBottom / pps) * pps;
+                if (Math.abs(vBottom - nearestLine) < 25) {
+                    const newH = Math.max(15, nearestLine - vTop);
+                    const dh = newH - vH;
+                    el.style.height = newH + 'px';
+                    // 下にある音符をずらす
+                    document.querySelectorAll('.note-block').forEach(b => {
+                        if (b !== el && parseFloat(b.style.top) >= vTop + vH - 1) {
+                            b.style.top = (parseFloat(b.style.top) + dh) + 'px';
+                        }
+                    });
+                }
+            }
+            isD = isR = false; 
+        });
     }
 
     async function playMelody() {
@@ -711,6 +785,93 @@
             ct += bl;
         }
         syncPlayhead(ct); alert("🥁 ドラム生成完了");
+    }
+
+    function generateMeasurePhrase() {
+        const inst = document.getElementById('currentInst').value;
+        const style = document.getElementById('phraseStyle').value;
+        const key = parseInt(document.getElementById('keySelect').value);
+        const mH = pps * 4;
+        // 現在の再生ヘッド位置が含まれる小節の先頭にスナップ
+        const startTop = Math.floor(currentPlayheadY / mH) * mH;
+        saveHistory();
+        
+        // 生成前に、その小節内にある同じ楽器の音符をクリアする（少しでも重なっていれば削除）
+        const existing = Array.from(laneContents[inst].querySelectorAll('.note-block'));
+        existing.forEach(b => {
+            const t = parseFloat(b.style.top), h = parseFloat(b.style.height);
+            if (t < startTop + mH - 1 && t + h > startTop + 1) b.remove();
+        });
+        
+        const steps = [0, 2, 4, 5, 7, 9, 11]; // Major scale
+        const scale = steps.map(s => key + s);
+
+        const addNote = (m, t, h, i) => {
+            const b = createNoteElement(m, t, h, i);
+            laneContents[i].appendChild(b);
+            return b;
+        };
+
+        if (inst === 'drums') {
+            for (let i = 0; i < 8; i++) {
+                const ct = startTop + i * (pps / 2);
+                if (style === 'basic' || style === 'pop') { 
+                    if (i % 4 === 0) addNote(36, ct, 20, 'drums'); 
+                    if (i % 4 === 2) addNote(38, ct, 20, 'drums'); 
+                    addNote(42, ct, 20, 'drums'); 
+                } else if (style === 'rock') {
+                    if (i % 4 === 0 || i === 3) addNote(36, ct, 20, 'drums');
+                    if (i % 4 === 2) addNote(38, ct, 20, 'drums');
+                    addNote(42, ct, 20, 'drums');
+                } else if (style === 'dance') {
+                    addNote(36, ct, 20, 'drums');
+                    if (i % 4 === 2) addNote(38, ct, 20, 'drums');
+                    if (i % 2 === 1) addNote(42, ct, 20, 'drums');
+                } else if (style === 'cool') {
+                    if (i === 0 || i === 3 || i === 6) addNote(36, ct, 20, 'drums');
+                    if (i === 2 || i === 7) addNote(38, ct, 20, 'drums');
+                    addNote(42, ct, 20, 'drums');
+                }
+            }
+        } else if (inst === 'bass') {
+            const root = scale[0] + 36;
+            for (let i = 0; i < 8; i++) {
+                const ct = startTop + i * (pps / 2);
+                let note = root;
+                if (style === 'basic') { if (i % 2 === 0) addNote(note, ct, pps, 'bass'); }
+                else if (style === 'pop' || style === 'rock') { addNote(note, ct, pps / 2, 'bass'); }
+                else if (style === 'dance') { if (i % 8 === 0 || i % 8 === 3) addNote(note, ct, pps / 2, 'bass'); }
+                else if (style === 'cool') { 
+                    const n = [0, 0, 7, 0, 4, 0, 7, 10][i];
+                    addNote(root + n, ct, pps / 2, 'bass'); 
+                }
+            }
+        } else if (inst === 'guitar') {
+            const chords = [0, 2, 4].map(idx => scale[idx] + 48);
+            for (let i = 0; i < 4; i++) {
+                const ct = startTop + i * pps;
+                if (style === 'basic' || style === 'rock') { if (i % 2 === 0) chords.forEach(n => addNote(n, ct, pps * 2, 'guitar')); }
+                else if (style === 'pop') { chords.forEach(n => addNote(n, ct, pps * 0.8, 'guitar')); }
+                else if (style === 'dance') { if (i % 2 === 1) chords.forEach(n => addNote(n, ct, pps, 'guitar')); }
+                else if (style === 'cool') { chords.forEach((n, idx) => addNote(n, ct + idx * (pps/4), pps/4, 'guitar')); }
+            }
+        } else {
+            // メロディの生成ロジック: 重なりを防ぎ厳密に配置
+            let ct = startTop;
+            for (let i = 0; i < 4; i++) {
+                const rnd = Math.floor(Math.random() * 7);
+                const note = scale[rnd] + 60;
+                let dur = pps;
+                if (style === 'cool') {
+                    const pattern = [pps*1.5, pps*0.5, pps, pps];
+                    dur = pattern[i];
+                }
+                addNote(note, ct, dur, inst);
+                ct += dur; // 次の音符の開始位置をずらす
+            }
+        }
+        // 生成後はその小節の「先頭」にヘッドを戻し、すぐに再生確認できるようにする
+        syncPlayhead(startTop);
     }
 
     function deleteSelected() { saveHistory(); document.querySelectorAll('.note-block.selected').forEach(b => b.remove()); }
