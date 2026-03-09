@@ -733,8 +733,9 @@
     function stopMelody() { isPlaying = false; activeNodes.forEach(n => { try { n.stop(); } catch(e){} }); activeNodes = []; document.querySelectorAll('.note-block').forEach(b => b.classList.remove('playing')); }
 
     function generateProgression() {
-        const maxEnd = getMelodyEnd();
-        if (maxEnd <= 0) { alert("メロディデータが見つかりません。"); return; }
+        let maxEnd = getMelodyEnd();
+        // 何もデータがない場合はとりあえず8小節分生成する
+        if (maxEnd <= 0) maxEnd = pps * 4 * 8;
         
         saveHistory();
         const originalPlayhead = currentPlayheadY;
@@ -776,7 +777,7 @@
         }
         syncPlayhead(originalPlayhead);
         updateMeasureNumbers();
-        alert(`🎹 「進行生成」をメロディの最後まで拡張しました。`);
+        alert(`🎹 「進行生成」を完了しました。`);
     }
 
     function generateFullBackingMeasure() {
@@ -798,8 +799,8 @@
     }
 
     function generateFullBackingToMelodyEnd() {
-        const maxEnd = getMelodyEnd();
-        if (maxEnd <= 0) { alert("メロディデータが見つかりません。"); return; }
+        let maxEnd = getMelodyEnd();
+        if (maxEnd <= 0) maxEnd = pps * 4 * 8; // デフォルト8小節
 
         saveHistory();
         const originalPlayhead = currentPlayheadY;
@@ -873,14 +874,13 @@
         
         syncPlayhead(originalPlayhead);
         updateMeasureNumbers();
-        alert(`🎹 「進行生成」と「ドラム生成」をメロディの最後まで拡張しました。`);
+        alert(`🎹 伴奏を一括生成しました。`);
     }
 
     function getMelodyEnd() {
         let max = 0;
-        // 伴奏以外の全レーンの音符から、最も後ろにある座標を探す
+        // 全てのレーンの音符から、最も後ろにある座標を探す
         Object.keys(laneContents).forEach(inst => {
-            if (['drums', 'bass', 'guitar'].includes(inst)) return;
             const blocks = Array.from(laneContents[inst].querySelectorAll('.note-block'));
             blocks.forEach(b => {
                 const endPos = parseFloat(b.style.top) + parseFloat(b.style.height);
@@ -937,8 +937,8 @@
     }
 
     function generateDrum(skipHistory = false) {
-        const maxEnd = getMelodyEnd();
-        if (maxEnd <= 0) { alert("メロディデータが見つかりません。"); return; }
+        let maxEnd = getMelodyEnd();
+        if (maxEnd <= 0) maxEnd = pps * 4 * 8; // デフォルト8小節
 
         const type = document.getElementById('drumSelect').value;
         const mH = pps * 4;
@@ -981,7 +981,7 @@
             t += mH;
         }
         syncPlayhead(startTop);
-        if (!skipHistory) alert(`🥁 「ドラム生成」をメロディの最後まで拡張しました。`);
+        if (!skipHistory) alert(`🥁 「ドラム生成」を完了しました。`);
     }
 
     function generateMeasurePhrase(skipHistory = false) {
