@@ -25,8 +25,9 @@
         .track-header { 
             position: sticky; top: 0; background: #222; z-index: 500; 
             border-bottom: 2px solid #444; flex-shrink: 0;
+            height: 66px;
         }
-        .track-label { padding: 5px; font-weight: bold; color: #fff; font-size: 14px; text-shadow: 1px 1px 2px #000; }
+        .track-label { padding: 4px; font-weight: bold; color: #fff; font-size: 14px; text-shadow: 1px 1px 2px #000; }
 
         /* 音符を置くエリア */
         .lane-content { 
@@ -80,7 +81,7 @@
             display: flex; flex-direction: column; flex-shrink: 0; z-index: 1000;
         }
         #section-header { 
-            height: 65px; background: #333; border-bottom: 2px solid #444; 
+            height: 66px; background: #333; border-bottom: 2px solid #444; 
             display: flex; align-items: center; justify-content: center; 
             font-size: 12px; font-weight: bold; position: relative; z-index: 20; 
         }
@@ -194,6 +195,7 @@
             <option value="simple">基本 (1451)</option>
         </select>
         <button class="btn" style="background:#2196f3;" onclick="generateProgression()">✨ 進行生成</button>
+        <button class="btn" style="background:#e91e63;" onclick="generateFullBackingMeasure()">🎹 1小節伴奏一括生成</button>
         <span style="margin: 0 10px; border-left: solid #555;"></span>
         <select id="drumSelect" class="btn" style="background:#333; color:white; border:1px solid #757575; padding: 2px 5px; font-size: 11px;">
             <option value="four">4つ打ち</option>
@@ -209,6 +211,7 @@
             <option value="0.5" selected>8分</option>
             <option value="1">4分</option>
             <option value="2">2分</option>
+            <option value="4">1小節</option>
         </select>
         <select id="phraseStyle" class="btn" style="background:#333; color:white; border:1px solid #00bcd4;">
             <option value="basic">基本</option>
@@ -244,7 +247,7 @@
         flute: { name: "🌬️ フルート", colors: ["#FFD600", "#FFC400", "#FFAB00", "#FF8F00"] }
     };
 
-    let audioCtx, analyser, microphone, isRunning = false, nextTop = 10, currentBlock = null, lastNoteNumber = -1;
+    let audioCtx, analyser, microphone, isRunning = false, nextTop = 0, currentBlock = null, lastNoteNumber = -1;
     let activeNodes = [], isPlaying = false, masterGain;
     let historyStack = [], redoStack = [];
     let noteHistory = [];
@@ -669,7 +672,7 @@
     function createNoteElement(num, top, height, inst) {
         const b = document.createElement('div'); b.className = 'note-block';
         const keyEl = document.getElementById(`key-${inst}-${num}`), rect = keyEl.getBoundingClientRect(), crect = laneContents[inst].getBoundingClientRect();
-        b.style.width = (rect.width - 2) + 'px'; b.style.left = (rect.left - crect.left) + 'px'; b.style.top = (top - 10) + 'px'; b.style.height = height + 'px';
+        b.style.width = (rect.width - 2) + 'px'; b.style.left = (rect.left - crect.left) + 'px'; b.style.top = top + 'px'; b.style.height = height + 'px';
         let txt = noteNames[num % 12], bg = getInstColor(inst, num);
         if (inst === 'drums') { if (num === 36) { txt = "ドン"; bg = "#f44336"; } else if (num === 38) { txt = "タン"; bg = "#2196f3"; } else if (num === 42) { txt = "チッ"; bg = "#ffeb3b"; b.style.color = "#000"; } }
         b.style.backgroundColor = bg; const l = document.createElement('span'); l.className = 'note-label'; l.innerText = txt; b.appendChild(l);
@@ -728,28 +731,63 @@
     function generateProgression() {
         const type = document.getElementById('progSelect').value, key = parseInt(document.getElementById('keySelect').value); saveHistory();
         const progs = { canon: [0, 4, 5, 2, 3, 0, 3, 4], pop: [3, 4, 2, 5], komuro: [5, 3, 4, 0], simple: [0, 3, 4, 0] }, steps = [0, 2, 4, 5, 7, 9, 11], degs = progs[type], bl = pps * 2;
-        let st = currentPlayheadY, mb = st + pps * 16, s = document.querySelector('.section-block.selected');
+        let st = currentPlayheadY, mb = st + pps * 4, s = document.querySelector('.section-block.selected');
         if (s) { st = parseFloat(s.style.top); mb = st + parseFloat(s.style.height); }
+        
+        // 現在の小節番号を計算（0オリジン）
+        const measureIdx = Math.floor(st / (pps * 4));
+        
         let ct = st; while (ct < mb - 5) {
-            degs.forEach(d => {
-                if (ct + bl > mb + 5) return;
-                laneContents['bass'].appendChild(createNoteElement(key+steps[d]+36, ct, bl, 'bass'));
-                [0, 2, 4].forEach(idx => {
-                    const tidx = (d + idx) % 7, oct = Math.floor((d + idx) / 7);
-                    laneContents['guitar'].appendChild(createNoteElement(key+steps[tidx]+(oct*12)+52, ct, bl, 'guitar'));
-                    laneContents['piano'].appendChild(createNoteElement(key+steps[tidx]+(oct*12)+64, ct, bl, 'piano'));
-                });
-                ct += bl;
+            // 進行のループ内で適切なコードを選択
+            const progStep = (Math.floor((ct - st) / bl) + (measureIdx * 2)) % degs.length;
+            const d = degs[progStep];
+            
+            laneContents['bass'].appendChild(createNoteElement(key+steps[d]+36, ct, bl, 'bass'));
+            [0, 2, 4].forEach(idx => {
+                const tidx = (d + idx) % 7, oct = Math.floor((d + idx) / 7);
+                laneContents['guitar'].appendChild(createNoteElement(key+steps[tidx]+(oct*12)+52, ct, bl, 'guitar'));
+                laneContents['piano'].appendChild(createNoteElement(key+steps[tidx]+(oct*12)+64, ct, bl, 'piano'));
             });
+            ct += bl;
         }
-        syncPlayhead(ct); alert("✨ 進行を生成しました！");
+        syncPlayhead(st); // すぐ確認できるように先頭へ
+    }
+
+    function generateFullBackingMeasure() {
+        saveHistory();
+        const originalInst = document.getElementById('currentInst').value;
+        const originalStyle = document.getElementById('phraseStyle').value;
+        
+        // ドラム生成（1小節）
+        generateDrum();
+        
+        // ベースとギターを「フレーズ生成」ロジックで作成（より音楽的なパターンにするため）
+        document.getElementById('currentInst').value = 'bass';
+        generateMeasurePhrase();
+        
+        document.getElementById('currentInst').value = 'guitar';
+        generateMeasurePhrase();
+        
+        // 元に戻す
+        document.getElementById('currentInst').value = originalInst;
+        alert("🎹 1小節の伴奏を一括生成しました（ドラム・ベース・ギター）");
     }
 
     function generateBass() {
         const inst = document.getElementById('currentInst').value;
+        const mH = pps * 4;
+        const startT = Math.floor(currentPlayheadY / mH) * mH;
+        
         let sel = Array.from(document.querySelectorAll('.note-block.selected'));
-        if (sel.length === 0) sel = Array.from(laneContents[inst].querySelectorAll('.note-block'));
+        // 選択がない場合は現在の1小節内のノートを対象にする
+        if (sel.length === 0) {
+            sel = Array.from(laneContents[inst].querySelectorAll('.note-block')).filter(b => {
+                const t = parseFloat(b.style.top);
+                return t >= startT && t < startT + mH;
+            });
+        }
         if (sel.length === 0) return; saveHistory();
+        
         let min = Math.min(...sel.map(b => parseFloat(b.style.top))), max = Math.max(...sel.map(b => parseFloat(b.style.top) + parseFloat(b.style.height)));
         for (let t = min; t < max; t += pps) {
             const n = sel.find(b => t >= parseFloat(b.style.top) && t < parseFloat(b.style.top)+parseFloat(b.style.height)) || sel[0];
@@ -760,9 +798,18 @@
 
     function generateGuitar() {
         const inst = document.getElementById('currentInst').value;
+        const mH = pps * 4;
+        const startT = Math.floor(currentPlayheadY / mH) * mH;
+
         let sel = Array.from(document.querySelectorAll('.note-block.selected'));
-        if (sel.length === 0) sel = Array.from(laneContents[inst].querySelectorAll('.note-block'));
+        if (sel.length === 0) {
+            sel = Array.from(laneContents[inst].querySelectorAll('.note-block')).filter(b => {
+                const t = parseFloat(b.style.top);
+                return t >= startT && t < startT + mH;
+            });
+        }
         if (sel.length === 0) return; saveHistory();
+        
         let min = Math.min(...sel.map(b => parseFloat(b.style.top))), max = Math.max(...sel.map(b => parseFloat(b.style.top) + parseFloat(b.style.height)));
         const size = parseInt(document.getElementById('chordSize').value), ints = [0, 4, 7, 10, 14, 17, 21];
         for (let t = min; t < max; t += pps) {
@@ -773,18 +820,44 @@
     }
 
     function generateDrum() {
-        const type = document.getElementById('drumSelect').value; saveHistory();
-        let st = currentPlayheadY, mb = st + pps * 16, s = document.querySelector('.section-block.selected');
-        if (s) { st = parseFloat(s.style.top); mb = st + parseFloat(s.style.height); }
-        const bl = pps * 4, beat = pps, addD = (m, t) => laneContents['drums'].appendChild(createNoteElement(m, t, 20, 'drums'));
-        let ct = st; while (ct < mb - 5) {
-            for (let j=0; j<4; j++) {
-                if (type==='four'||type==='four_beat') { addD(36, ct + j*beat); if(j%2===1) addD(38, ct + j*beat); }
-                else if (type==='eight_beat') { addD(36, ct + (j%2===0?0:beat*0.5)); addD(38, ct+beat); addD(42, ct+j*beat); addD(42, ct+j*beat+beat*0.5); }
+        const type = document.getElementById('drumSelect').value;
+        const mH = pps * 4;
+        const startTop = Math.floor(currentPlayheadY / mH) * mH;
+        saveHistory();
+        
+        // 既存音符のクリア
+        const existing = Array.from(laneContents['drums'].querySelectorAll('.note-block'));
+        existing.forEach(b => {
+            const t = parseFloat(b.style.top), h = parseFloat(b.style.height);
+            if (t < startTop + mH - 1 && t + h > startTop + 1) b.remove();
+        });
+
+        // 音符の高さを拍の長さに合わせる (8分音符 = pps/2)
+        const h8 = pps / 2;
+        const addD = (m, t, h) => laneContents['drums'].appendChild(createNoteElement(m, t, h, 'drums'));
+        
+        for (let i = 0; i < 8; i++) {
+            const ct = startTop + i * h8;
+            if (type === 'four' || type === 'four_beat') {
+                if (i % 2 === 0) { 
+                    addD(36, ct, h8 * 2); // 4分音符の長さ
+                    if (i % 4 === 2) addD(38, ct, h8 * 2);
+                }
+            } else if (type === 'eight_beat') {
+                if (i % 2 === 0) addD(36, ct, h8); 
+                if (i === 2 || i === 6) addD(38, ct, h8);
+                addD(42, ct, h8); // 8分音符の長さで隙間なく埋める
+            } else if (type === 'sixteen_beat') {
+                const h16 = pps / 4;
+                for(let j=0; j<2; j++) {
+                    const ct16 = ct + j * h16;
+                    if (i % 4 === 0 && j === 0) addD(36, ct16, h16 * 2);
+                    if ((i === 2 || i === 6) && j === 0) addD(38, ct16, h16 * 2);
+                    addD(42, ct16, h16);
+                }
             }
-            ct += bl;
         }
-        syncPlayhead(ct); alert("🥁 ドラム生成完了");
+        syncPlayhead(startTop);
     }
 
     function generateMeasurePhrase() {
