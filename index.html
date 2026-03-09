@@ -196,6 +196,7 @@
         </select>
         <button class="btn" style="background:#2196f3;" onclick="generateProgression()">✨ 進行生成</button>
         <button class="btn" style="background:#e91e63;" onclick="generateFullBackingMeasure()">🎹 1小節伴奏一括生成</button>
+        <button class="btn" style="background:#ad1457;" onclick="generateFullBackingToMelodyEnd()">🎹 全小節伴奏一括生成</button>
         <span style="margin: 0 10px; border-left: solid #555;"></span>
         <select id="drumSelect" class="btn" style="background:#333; color:white; border:1px solid #757575; padding: 2px 5px; font-size: 11px;">
             <option value="four">4つ打ち</option>
@@ -271,7 +272,10 @@
         const container = document.getElementById('measure-numbers');
         container.innerHTML = '';
         const measureHeight = pps * 4;
-        for (let i = 0; i < 100; i++) {
+        const end = getMelodyEnd();
+        const numMeasures = Math.max(50, Math.ceil(end / measureHeight) + 10);
+        
+        for (let i = 0; i < numMeasures; i++) {
             const div = document.createElement('div');
             div.className = 'measure-number';
             div.style.top = (i * measureHeight) + 'px';
@@ -756,21 +760,121 @@
     function generateFullBackingMeasure() {
         saveHistory();
         const originalInst = document.getElementById('currentInst').value;
-        const originalStyle = document.getElementById('phraseStyle').value;
         
         // ドラム生成（1小節）
-        generateDrum();
+        generateDrum(true);
         
-        // ベースとギターを「フレーズ生成」ロジックで作成（より音楽的なパターンにするため）
+        // ベースとギターを「フレーズ生成」ロジックで作成
         document.getElementById('currentInst').value = 'bass';
-        generateMeasurePhrase();
+        generateMeasurePhrase(true);
         
         document.getElementById('currentInst').value = 'guitar';
-        generateMeasurePhrase();
+        generateMeasurePhrase(true);
         
-        // 元に戻す
         document.getElementById('currentInst').value = originalInst;
         alert("🎹 1小節の伴奏を一括生成しました（ドラム・ベース・ギター）");
+    }
+
+    function generateFullBackingToMelodyEnd() {
+        const maxEnd = getMelodyEnd();
+        if (maxEnd <= 0) { alert("メロディデータが見つかりません。"); return; }
+
+        saveHistory();
+        const originalInst = document.getElementById('currentInst').value;
+        const originalPlayhead = currentPlayheadY;
+        const mH = pps * 4; // 1小節の高さ
+        
+        // 1. 伴奏レーンを現在の位置から末尾まで完全にクリア（ゴミを残さない）
+        ['drums', 'bass', 'guitar'].forEach(inst => {
+            const blocks = Array.from(laneContents[inst].querySelectorAll('.note-block'));
+            blocks.forEach(b => {
+                if (parseFloat(b.style.top) >= currentPlayheadY - 1) b.remove();
+            });
+        });
+
+        const progType = document.getElementById('progSelect').value;
+        const progs = { canon: [0, 4, 5, 2, 3, 0, 3, 4], pop: [3, 4, 2, 5], komuro: [5, 3, 4, 0], simple: [0, 3, 4, 0] };
+        const degs = progs[progType];
+        const key = parseInt(document.getElementById('keySelect').value);
+        const steps = [0, 2, 4, 5, 7, 9, 11];
+        const style = document.getElementById('phraseStyle').value;
+        const drumType = document.getElementById('drumSelect').value;
+
+        // 2. 生成ループ：現在の再生ヘッド位置から「データの終端」を超えるまで
+        let t = Math.floor(currentPlayheadY / mH) * mH;
+        
+        // 【重要】ここが生成のリミットを外すループです
+        while (t < maxEnd) {
+            const measureIdx = Math.floor(t / mH);
+            
+            // --- ドラム・ストリーム生成 ---
+            const h8 = pps / 2;
+            for (let i = 0; i < 8; i++) {
+                const ct = t + i * h8;
+                if (drumType === 'four' || drumType === 'four_beat') {
+                    if (i % 2 === 0) { createAndAddNote(36, ct, h8 * 2, 'drums'); if (i % 4 === 2) createAndAddNote(38, ct, h8 * 2, 'drums'); }
+                } else if (drumType === 'eight_beat') {
+                    if (i % 2 === 0) createAndAddNote(36, ct, h8, 'drums');
+                    if (i === 2 || i === 6) createAndAddNote(38, ct, h8, 'drums');
+                    createAndAddNote(42, ct, h8, 'drums');
+                } else if (drumType === 'sixteen_beat') {
+                    const h16 = pps / 4;
+                    for(let j=0; j<2; j++) {
+                        const ct16 = ct + j * h16;
+                        if (i % 4 === 0 && j === 0) createAndAddNote(36, ct16, h16 * 2, 'drums');
+                        if ((i === 2 || i === 6) && j === 0) createAndAddNote(38, ct16, h16 * 2, 'drums');
+                        createAndAddNote(42, ct16, h16, 'drums');
+                    }
+                }
+            }
+
+            // --- ベース & ギター・ストリーム生成 ---
+            for (let stepInM = 0; stepInM < 2; stepInM++) {
+                const ct = t + stepInM * (pps * 2);
+                const pIdx = (measureIdx * 2 + stepInM) % degs.length;
+                const d = degs[pIdx];
+                const root = key + steps[d];
+                
+                // ベース
+                const bRoot = root + 36;
+                for (let j = 0; j < 4; j++) {
+                    const nt = ct + j * (pps / 2);
+                    if (style === 'basic' && j % 2 === 0) createAndAddNote(bRoot, nt, pps, 'bass');
+                    else if (style === 'pop' || style === 'rock') createAndAddNote(bRoot, nt, pps / 2, 'bass');
+                    else if (style === 'dance' && (j === 0 || j === 3)) createAndAddNote(bRoot, nt, pps / 2, 'bass');
+                    else if (style === 'cool') createAndAddNote(bRoot + [0, 7, 0, 10][j], nt, pps / 2, 'bass');
+                }
+
+                // ギター
+                const gChords = [root + 48, root + 52, root + 55];
+                if (style === 'basic' || style === 'rock') { gChords.forEach(n => createAndAddNote(n, ct, pps * 2, 'guitar')); }
+                else if (style === 'pop') { gChords.forEach(n => createAndAddNote(n, ct, pps * 0.8, 'guitar')); }
+                else if (style === 'dance') { gChords.forEach(n => createAndAddNote(n, ct + pps, pps, 'guitar')); }
+                else if (style === 'cool') { gChords.forEach((n, idx) => createAndAddNote(n, ct + idx * (pps/4), pps/4, 'guitar')); }
+            }
+
+            t += mH; // 確実に1小節分進める
+        }
+        
+        // 3. UIの復元と拡張
+        document.getElementById('currentInst').value = originalInst;
+        syncPlayhead(originalPlayhead);
+        updateMeasureNumbers(); // 小節表示を最新の長さに更新
+        alert(`🎹 データの末尾（座標: ${Math.round(maxEnd)}px）まで全小節の伴奏を生成しました。`);
+    }
+
+    function getMelodyEnd() {
+        let max = 0;
+        // 伴奏以外の全レーンの音符から、最も後ろにある座標を探す
+        Object.keys(laneContents).forEach(inst => {
+            if (['drums', 'bass', 'guitar'].includes(inst)) return;
+            const blocks = Array.from(laneContents[inst].querySelectorAll('.note-block'));
+            blocks.forEach(b => {
+                const endPos = parseFloat(b.style.top) + parseFloat(b.style.height);
+                if (endPos > max) max = endPos;
+            });
+        });
+        return max;
     }
 
     function generateBass() {
@@ -819,11 +923,11 @@
         }
     }
 
-    function generateDrum() {
+    function generateDrum(skipHistory = false) {
         const type = document.getElementById('drumSelect').value;
         const mH = pps * 4;
         const startTop = Math.floor(currentPlayheadY / mH) * mH;
-        saveHistory();
+        if (!skipHistory) saveHistory();
         
         // 既存音符のクリア
         const existing = Array.from(laneContents['drums'].querySelectorAll('.note-block'));
@@ -860,16 +964,15 @@
         syncPlayhead(startTop);
     }
 
-    function generateMeasurePhrase() {
+    function generateMeasurePhrase(skipHistory = false) {
         const inst = document.getElementById('currentInst').value;
         const style = document.getElementById('phraseStyle').value;
         const key = parseInt(document.getElementById('keySelect').value);
         const mH = pps * 4;
-        // 現在の再生ヘッド位置が含まれる小節の先頭にスナップ
         const startTop = Math.floor(currentPlayheadY / mH) * mH;
-        saveHistory();
+        if (!skipHistory) saveHistory();
         
-        // 生成前に、その小節内にある同じ楽器の音符をクリアする（少しでも重なっていれば削除）
+        // 生成前にクリア
         const existing = Array.from(laneContents[inst].querySelectorAll('.note-block'));
         existing.forEach(b => {
             const t = parseFloat(b.style.top), h = parseFloat(b.style.height);
@@ -929,7 +1032,6 @@
                 else if (style === 'cool') { chords.forEach((n, idx) => addNote(n, ct + idx * (pps/4), pps/4, 'guitar')); }
             }
         } else {
-            // メロディの生成ロジック: 重なりを防ぎ厳密に配置
             let ct = startTop;
             for (let i = 0; i < 4; i++) {
                 const rnd = Math.floor(Math.random() * 7);
@@ -940,10 +1042,9 @@
                     dur = pattern[i];
                 }
                 addNote(note, ct, dur, inst);
-                ct += dur; // 次の音符の開始位置をずらす
+                ct += dur;
             }
         }
-        // 生成後はその小節の「先頭」にヘッドを戻し、すぐに再生確認できるようにする
         syncPlayhead(startTop);
     }
 
