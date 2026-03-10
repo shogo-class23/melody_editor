@@ -569,17 +569,29 @@
             o1.type = 'triangle'; o2.type = 'sine'; o1.frequency.value = freq; o2.frequency.value = freq * 2.01;
             const g1 = audioCtx.createGain(), g2 = audioCtx.createGain(); g1.gain.value = 1.0; g2.gain.value = 0.5;
             const rel = duration > 0 ? duration : 1.5;
-            g.gain.linearRampToValueAtTime(0.8, startTime + 0.01); g.gain.exponentialRampToValueAtTime(0.001, startTime + 0.01 + rel);
+            const fadeTime = 0.05; // クロスフェード用の短い余韻
+            g.gain.linearRampToValueAtTime(0.8, startTime + 0.01); 
+            // 次の音と重なるよう、終了直前まで音を維持し、最後に滑らかに消す
+            g.gain.setValueAtTime(0.8, startTime + rel);
+            g.gain.exponentialRampToValueAtTime(0.001, startTime + rel + fadeTime);
             o1.connect(g1); g1.connect(g); o2.connect(g2); g2.connect(g); nodes.push(o1, o2); o1.start(startTime); o2.start(startTime);
         } else if (type === 'guitar') {
             const o = audioCtx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = freq;
             const f = audioCtx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.setValueAtTime(4000, startTime); f.frequency.exponentialRampToValueAtTime(400, startTime + 0.5);
-            g.gain.linearRampToValueAtTime(0.6, startTime + 0.005); g.gain.exponentialRampToValueAtTime(0.001, startTime + (duration > 0 ? duration : 1.2));
+            const rel = duration > 0 ? duration : 1.2;
+            const fadeTime = 0.05;
+            g.gain.linearRampToValueAtTime(0.6, startTime + 0.005); 
+            g.gain.setValueAtTime(0.6, startTime + rel);
+            g.gain.exponentialRampToValueAtTime(0.001, startTime + rel + fadeTime);
             o.connect(f); f.connect(g); nodes.push(o); o.start(startTime);
         } else if (type === 'bass') {
             const o = audioCtx.createOscillator(); o.type = 'triangle'; o.frequency.value = freq / 2;
-            g.gain.linearRampToValueAtTime(0.7, startTime + 0.02); o.connect(g); nodes.push(o); o.start(startTime);
-            if (duration > 0) { g.gain.setValueAtTime(0.7, startTime + duration); g.gain.linearRampToValueAtTime(0, startTime + duration + 0.05); }
+            const rel = duration > 0 ? duration : 1.0;
+            const fadeTime = 0.05;
+            g.gain.linearRampToValueAtTime(0.7, startTime + 0.02); 
+            g.gain.setValueAtTime(0.7, startTime + rel);
+            g.gain.linearRampToValueAtTime(0, startTime + rel + fadeTime);
+            o.connect(g); nodes.push(o); o.start(startTime);
         } else if (type === 'drums') {
             if (midi === 36) {
                 const o = audioCtx.createOscillator(); o.type = 'sine'; o.frequency.setValueAtTime(150, startTime); o.frequency.exponentialRampToValueAtTime(40, startTime + 0.1);
@@ -830,6 +842,12 @@
         const maxPos = Math.max(...allNotes.map(b => parseFloat(b.style.top) + parseFloat(b.style.height)));
         const bt = audioCtx.currentTime + 0.1; updatePlayhead(bt, startPos, pps, maxPos);
         
+        // メロディの音程情報をマッピング（歌詞のピッチ同期用）
+        const melodyMap = {};
+        blocks.filter(nb => nb.dataset.inst === 'melody').forEach(nb => {
+            melodyMap[Math.round(parseFloat(nb.style.top))] = parseInt(nb.dataset.midi);
+        });
+
         blocks.forEach(b => {
             const m = parseInt(b.dataset.midi), i = b.dataset.inst, t = parseFloat(b.style.top), h = parseFloat(b.style.height);
             const st = bt + Math.max(0, t - startPos) / pps, dur = h / pps;
@@ -847,7 +865,17 @@
                             window.speechSynthesis.cancel();
                             const ut = new SpeechSynthesisUtterance(txt);
                             ut.lang = 'ja-JP';
-                            ut.rate = 2.0; // 速度を上げて「もっさり感」を解消
+
+                            // 【ピッチシフト】同じ位置にあるメロディの音程に合わせる
+                            const melodyMidi = melodyMap[Math.round(t)];
+                            if (melodyMidi) {
+                                // MIDI 60 (C4) を基準(1.0)としてピッチを可変
+                                ut.pitch = Math.max(0.1, Math.min(2.0, 1 + (melodyMidi - 60) / 24));
+                            }
+
+                            // 【長さ調整】音符の長さに合わせて速度(rate)を変える
+                            ut.rate = Math.max(0.5, Math.min(3.5, (pps / h) * 1.5));
+
                             activeUtterances.push(ut); 
                             ut.onend = () => { activeUtterances = activeUtterances.filter(a => a !== ut); };
                             window.speechSynthesis.speak(ut);
