@@ -278,6 +278,7 @@
     let recordStartTime = 0, recordStartTop = 0;
     let pps = 80;
     let countdownTimer = null;
+    let activeUtterances = [];
 
     function updateSpeed(val) {
         pps = parseInt(val);
@@ -823,7 +824,9 @@
         const startPos = currentPlayheadY, allNotes = Array.from(document.querySelectorAll('.note-block'));
         const blocks = allNotes.filter(b => (parseFloat(b.style.top) + parseFloat(b.style.height)) > startPos).sort((a,b) => parseFloat(a.style.top) - parseFloat(b.style.top));
         if (blocks.length === 0) return;
+        
         isPlaying = true;
+        activeUtterances = []; // 読み上げリストをリセット
         const maxPos = Math.max(...allNotes.map(b => parseFloat(b.style.top) + parseFloat(b.style.height)));
         const bt = audioCtx.currentTime + 0.1; updatePlayhead(bt, startPos, pps, maxPos);
         
@@ -832,17 +835,25 @@
             const st = bt + Math.max(0, t - startPos) / pps, dur = h / pps;
             
             if (i === 'lyrics') {
-                // 読み上げ機能がONの場合
                 if (isTTSActive) {
-                    const txt = b.querySelector('.note-label').innerText;
+                    // 「井桁」や記号（#）を読み上げから除外する。また「歌詞」という文字も無視する。
+                    let txt = b.querySelector('.note-label').innerText.replace(/[#井桁]/g, "").trim();
                     if (txt && txt !== "歌詞") {
+                        // 読み上げエンジンの起動ラグを考慮し、50ms早めに命令を出す
+                        const delay = (st - audioCtx.currentTime) * 1000 - 50;
                         setTimeout(() => {
                             if (!isPlaying || !isTTSActive) return;
+                            // 前の音を即座に消して、次の文字の出だしを鋭くする
+                            window.speechSynthesis.cancel();
                             const ut = new SpeechSynthesisUtterance(txt);
                             ut.lang = 'ja-JP';
-                            ut.rate = 1.2; // 少し速めに設定
+                            ut.rate = 2.0; // 速度を上げて「もっさり感」を解消
+                            activeUtterances.push(ut); 
+                            ut.onend = () => { activeUtterances = activeUtterances.filter(a => a !== ut); };
                             window.speechSynthesis.speak(ut);
-                        }, (st - audioCtx.currentTime) * 1000);
+                            b.classList.add('playing');
+                        }, Math.max(0, delay));
+                        setTimeout(() => { b.classList.remove('playing'); }, (st + dur - audioCtx.currentTime) * 1000);
                     }
                 }
                 return;
@@ -856,6 +867,7 @@
 
     function stopMelody() { 
         isPlaying = false; 
+        activeUtterances = []; // リストを空にする
         activeNodes.forEach(n => { try { n.stop(); } catch(e){} }); 
         activeNodes = []; 
         document.querySelectorAll('.note-block').forEach(b => b.classList.remove('playing'));
